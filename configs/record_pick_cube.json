@@ -1,7 +1,7 @@
 {
-  "task": "cube_v4_3view_side",
+  "task": "cube_v6_processed",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_v4_3view_side",
+  "repo_id": "local/cube_v6_processed",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
@@ -15,27 +15,31 @@
   "leader_left_can": null,
   "leader_right_can": null,
   "camera_width": 640,
-  "camera_height": 360,
+  "camera_height": 480,
   "camera_fps": 30,
   "image_format": "jpg",
   "image_quality": 95,
   "action_source": "auto",
   "training": {
     "policy_type": "act",
-    "job_name": "act_cube_v4_3view_side",
-    "output_dir": "outputs/train/act_cube_v4_3view_side",
+    "job_name": "act_cube_v6_processed",
+    "output_dir": "outputs/train/act_cube_v6_processed",
     "device": "cuda",
-    "steps": 10000,
+    "steps": 15000,
     "batch_size": 4,
     "log_freq": 100,
     "save_freq": 1000,
     "wandb_enable": false,
-    "video_backend": "pyav"
+    "video_backend": "pyav",
+    "outcome_filter": "exclude-failures",
+    "include_unknown": false,
+    "exclude_unlabeled": true,
+    "push_to_hub": false
   },
   "policy_live": {
-    "policy_path": "outputs/train/act_cube_v4_3view_side/checkpoints/010000/pretrained_model",
-    "repo_id": "local/cube_v4_3view_side",
-    "dataset_root": "data/lerobot/local/cube_v4_3view_side",
+    "policy_path": "outputs/train/act_cube_v6_processed/checkpoints/005000/pretrained_model",
+    "repo_id": "local/cube_v6_processed",
+    "dataset_root": "data/lerobot/local/cube_v6_processed",
     "video_backend": "pyav",
     "device": "cuda",
     "execute": true,
@@ -65,5 +69,28 @@
       "name": "cam_top",
       "ref": 10
     }
-  ]
+  ],
+  "preprocessing": {
+    "enabled": true,
+    "images": {
+      "enabled": true,
+      "white_balance": true,
+      "clahe_clip_limit": 2.0,
+      "clahe_tile_grid_size": 8,
+      "orange_boost": {
+        "enabled": true,
+        "hue_range": [5, 25],
+        "sat_scale": 1.2,
+        "val_scale": 1.05
+      }
+    },
+    "smoothing": {
+      "enabled": true,
+      "method": "ema",
+      "ema_alpha": 0.25,
+      "gripper_ema_alpha": 0.35,
+      "savgol_window": 7,
+      "savgol_polyorder": 2
+    }
+  }
 }

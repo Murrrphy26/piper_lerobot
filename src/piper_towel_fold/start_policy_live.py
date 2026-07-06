@@ -93,6 +93,11 @@ def build_namespace(config: dict[str, Any]) -> argparse.Namespace:
         root = policy_live.get("root", config.get("root", "data/lerobot"))
         args.dataset_root = str(Path(str(root)) / str(policy_live["repo_id"]))
 
+    preprocessing = config.get("preprocessing")
+    if preprocessing is None:
+        preprocessing = policy_live.get("preprocessing")
+    args.preprocessing = preprocessing
+
     return args
 
 

@@ -8,6 +8,7 @@ from lerobot.cameras.opencv import OpenCVCameraConfig
 
 from .config import PiperRobotConfig
 from .piper import PiperRobot
+from .preprocessing import FramePreprocessor, load_preprocessing_config
 from .recorder import LeRobotEpisodeRecorder, PiperEpisodeRecorder
 
 
@@ -59,6 +60,7 @@ def write_episode_outcome(
     task: str,
     outcome: str,
     stop_reason: str,
+    episode_index: int | None = None,
 ) -> None:
     if outcome == "skip":
         return
@@ -71,6 +73,8 @@ def write_episode_outcome(
         "outcome": outcome,
         "stop_reason": stop_reason,
     }
+    if episode_index is not None:
+        outcome_record["episode_index"] = episode_index
     with outcome_path.open("a", encoding="utf-8") as outcome_file:
         outcome_file.write(json.dumps(outcome_record, ensure_ascii=False) + "\n")
 
@@ -194,6 +198,15 @@ def run_recording(args: argparse.Namespace) -> None:
     period = 1.0 / args.fps
     started_at = time.monotonic()
     camera_shape = (args.camera_height, args.camera_width, 3)
+    camera_names = list(camera_configs.keys())
+    preprocessing = getattr(args, "preprocessing", None)
+    frame_preprocessor = (
+        FramePreprocessor(load_preprocessing_config(preprocessing), mode="online")
+        if preprocessing is not None
+        else None
+    )
+    if frame_preprocessor is not None and frame_preprocessor.enabled:
+        print("Frame preprocessing enabled for recording.")
     stop_reason = "completed"
     episode_path: Path | None = None
     stop_requested, previous_sigint_handler = install_stop_handler()
@@ -226,6 +239,8 @@ def run_recording(args: argparse.Namespace) -> None:
             episode_path = Path(recorder.episode_dir)
             print(f"Recording to {recorder.episode_dir}")
             print("Press Ctrl+C once to stop after the current frame and save the episode.")
+            if frame_preprocessor is not None:
+                frame_preprocessor.reset()
             while True:
                 loop_started_at = time.monotonic()
                 observation = robot.get_observation()
@@ -237,6 +252,13 @@ def run_recording(args: argparse.Namespace) -> None:
                         for key, value in observation.items()
                         if key.endswith(".pos")
                     }
+
+                if frame_preprocessor is not None and frame_preprocessor.enabled:
+                    observation, action = frame_preprocessor.process_frame(
+                        observation,
+                        action,
+                        camera_names,
+                    )
 
                 recorder.record_frame(observation=observation, action=action)
 
@@ -260,11 +282,20 @@ def run_recording(args: argparse.Namespace) -> None:
 
     if episode_path is not None:
         outcome = prompt_episode_outcome() if args.prompt_outcome else args.episode_outcome
+        episode_index: int | None = None
+        if args.dataset_format == "lerobot":
+            try:
+                from .episode_outcomes import read_episode_count
+
+                episode_index = read_episode_count(episode_path) - 1
+            except (FileNotFoundError, ValueError, json.JSONDecodeError):
+                episode_index = None
         write_episode_outcome(
             dataset_path=episode_path,
             task=args.task,
             outcome=outcome,
             stop_reason=stop_reason,
+            episode_index=episode_index,
         )
 
 

@@ -12,6 +12,7 @@ from lerobot.cameras.opencv import OpenCVCameraConfig
 from .config import PiperRobotConfig
 from .offline_infer import action_tensor_to_dict, load_dataset, load_policy
 from .piper import PiperRobot
+from .preprocessing import FramePreprocessor, load_preprocessing_config
 from .recorder import ARM_STATE_KEYS
 
 
@@ -230,6 +231,14 @@ def run_live_policy(args: argparse.Namespace) -> None:
 
     policy_config, policy, make_pre_post_processors = load_policy(args.policy_path, args.device)
     dataset_stats = load_dataset_stats(args)
+    preprocessing = getattr(args, "preprocessing", None)
+    frame_preprocessor = (
+        FramePreprocessor(load_preprocessing_config(preprocessing), mode="online")
+        if preprocessing is not None
+        else None
+    )
+    if frame_preprocessor is not None and frame_preprocessor.enabled:
+        print("Frame preprocessing enabled for live inference.")
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=policy_config,
         pretrained_path=args.policy_path,
@@ -268,6 +277,8 @@ def run_live_policy(args: argparse.Namespace) -> None:
 
     try:
         robot.connect()
+        if frame_preprocessor is not None:
+            frame_preprocessor.reset()
         step = 0
         while not stop_requested["value"]:
             loop_started_at = time.monotonic()
@@ -275,6 +286,8 @@ def run_live_policy(args: argparse.Namespace) -> None:
                 break
 
             observation = robot.get_observation()
+            if frame_preprocessor is not None and frame_preprocessor.enabled:
+                observation = frame_preprocessor.process_observation(observation, camera_names)
             current_action = current_action_from_observation(observation)
             if previous_action is None:
                 previous_action = current_action

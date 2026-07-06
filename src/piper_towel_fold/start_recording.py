@@ -32,6 +32,9 @@ def cameras_to_csv(config: dict) -> tuple[str, str]:
     return ",".join(camera_refs), ",".join(camera_names)
 
 
+SKIP_CONFIG_KEYS = {"cameras", "training", "policy_live", "preprocessing"}
+
+
 def build_namespace(config: dict) -> argparse.Namespace:
     from .record_episode import build_arg_parser
 
@@ -44,11 +47,13 @@ def build_namespace(config: dict) -> argparse.Namespace:
         config["camera_names"] = camera_names
 
     for key, value in config.items():
-        if key == "cameras":
+        if key in SKIP_CONFIG_KEYS:
             continue
         if not hasattr(args, key):
             raise ValueError(f"Unsupported config key: {key}")
         setattr(args, key, value)
+
+    args.preprocessing = config.get("preprocessing")
     return args
 
 

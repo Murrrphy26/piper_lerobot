@@ -18,7 +18,11 @@ DEFAULTS: dict[str, Any] = {
     "wandb_enable": False,
     "video_backend": "pyav",
     "pytorch_alloc_conf": "expandable_segments:True",
-    "tolerance_s": 5.0,  # 添加了这一行
+    "tolerance_s": 5.0,
+    "outcome_filter": "exclude-failures",
+    "include_unknown": False,
+    "exclude_unlabeled": True,
+    "push_to_hub": False,
 }
 
 
@@ -89,6 +93,36 @@ def validate_dataset(path: Path) -> None:
         raise FileNotFoundError(f"No parquet files found under {path / 'data'}.")
 
 
+def append_training_episodes(
+    cmd: list[str],
+    dataset_root: Path,
+    training: dict[str, Any],
+) -> list[int] | None:
+    from .episode_outcomes import resolve_training_episodes, summarize_outcomes
+
+    episodes = resolve_training_episodes(dataset_root, training)
+    if episodes is not None:
+        cmd.append(f"--dataset.episodes={json.dumps(episodes)}")
+
+    summary = summarize_outcomes(dataset_root)
+    counts = summary["counts"]
+    print("Episode outcome filter")
+    print(f"  mode: {training.get('outcome_filter', 'exclude-failures')}")
+    print(
+        "  dataset labels: "
+        f"success={counts['success']} "
+        f"failure={counts['failure']} "
+        f"unknown={counts['unknown']} "
+        f"unlabeled={counts['unlabeled']}"
+    )
+    if episodes is None:
+        print("  training episodes: all")
+    else:
+        print(f"  training episodes: {len(episodes)} of {summary['num_episodes']} ({episodes})")
+    print()
+    return episodes
+
+
 def command_from_config(config: dict[str, Any], training: dict[str, Any], path: Path) -> list[str]:
     repo_id = str(config["repo_id"])
     policy_type = str(training["policy_type"])
@@ -111,12 +145,14 @@ def command_from_config(config: dict[str, Any], training: dict[str, Any], path: 
         f"--save_freq={training['save_freq']}",
         f"--wandb.enable={str(training['wandb_enable']).lower()}",
         f"--policy.repo_id={policy_repo_id}",
+        f"--policy.push_to_hub={str(training.get('push_to_hub', False)).lower()}",
     ]
     
     # 添加容差参数（如果配置中有的话）
     if "tolerance_s" in training:
         cmd.append(f"--tolerance_s={training['tolerance_s']}")
-    
+
+    append_training_episodes(cmd, path, training)
     return cmd
 
 
