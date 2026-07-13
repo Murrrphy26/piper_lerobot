@@ -1,3 +1,22 @@
+# Python打包缓存
+*.egg-info/
+dist/
+build/
+*.whl
+# 编译缓存
 __pycache__/
-.codex
-*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+# 日志、权重、数据集
+*.log
+*.ckpt
+*.pth
+dataset/
+outputs/
+# 编辑器配置
+.vscode/
+.idea/
+# conda环境
+env/
+venv/

@@ -42,6 +42,24 @@ def parse_args() -> argparse.Namespace:
         help="Inference device.",
     )
     parser.add_argument(
+        "--inference-dtype",
+        default=None,
+        choices=("bfloat16", "float32"),
+        help="Override checkpoint dtype for inference (e.g. bfloat16 to reduce VRAM).",
+    )
+    parser.add_argument(
+        "--compile-model",
+        default=None,
+        choices=("true", "false"),
+        help="Override torch.compile during inference (false reduces peak VRAM).",
+    )
+    parser.add_argument(
+        "--num-inference-steps",
+        type=int,
+        default=None,
+        help="Override flow-matching denoising steps (lower values use less VRAM).",
+    )
+    parser.add_argument(
         "--video-backend",
         default="pyav",
         choices=("pyav", "torchcodec"),
@@ -67,7 +85,36 @@ def import_lerobot_dataset() -> type:
     raise ImportError("Could not import LeRobotDataset from the current lerobot installation.")
 
 
-def load_policy(policy_path: str, device: str):
+def _parse_optional_bool(value: bool | str | None) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise ValueError(f"Expected a boolean value, got {value!r}.")
+
+
+def inference_options_from_namespace(args: argparse.Namespace) -> dict[str, Any]:
+    compile_model = _parse_optional_bool(getattr(args, "compile_model", None))
+    return {
+        "inference_dtype": getattr(args, "inference_dtype", None),
+        "compile_model": compile_model,
+        "num_inference_steps": getattr(args, "num_inference_steps", None),
+    }
+
+
+def load_policy(
+    policy_path: str,
+    device: str,
+    *,
+    inference_dtype: str | None = None,
+    compile_model: bool | None = None,
+    num_inference_steps: int | None = None,
+):
     try:
         from lerobot.configs import PreTrainedConfig
     except ImportError:
@@ -78,18 +125,36 @@ def load_policy(policy_path: str, device: str):
     except ImportError:
         from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 
-    # config = PreTrainedConfig.from_pretrained(policy_path)
     config = PreTrainedConfig.from_pretrained(
-    policy_path,
-    local_files_only=True  # 只在本地查找
-)
+        policy_path,
+        local_files_only=True,
+    )
     config.pretrained_path = policy_path
     config.device = device
+
+    overrides: list[str] = []
+    if inference_dtype is not None:
+        config.dtype = inference_dtype
+        overrides.append(f"dtype={inference_dtype}")
+    if compile_model is not None:
+        config.compile_model = compile_model
+        overrides.append(f"compile_model={compile_model}")
+    if num_inference_steps is not None:
+        if num_inference_steps <= 0:
+            raise ValueError("num_inference_steps must be greater than 0.")
+        config.num_inference_steps = num_inference_steps
+        overrides.append(f"num_inference_steps={num_inference_steps}")
+
+    if device == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     policy_class = get_policy_class(config.type)
     policy = policy_class.from_pretrained(policy_path, config=config)
     policy.eval()
     policy.to(device)
+
+    if overrides:
+        print(f"Inference overrides applied: {', '.join(overrides)}")
 
     return config, policy, make_pre_post_processors
 
@@ -209,7 +274,11 @@ def main() -> None:
         dataset_root=args.dataset_root,
         video_backend=args.video_backend,
     )
-    config, policy, make_pre_post_processors = load_policy(args.policy_path, args.device)
+    config, policy, make_pre_post_processors = load_policy(
+        args.policy_path,
+        args.device,
+        **inference_options_from_namespace(args),
+    )
 
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=config,

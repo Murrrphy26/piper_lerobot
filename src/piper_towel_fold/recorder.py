@@ -346,3 +346,41 @@ class LeRobotEpisodeRecorder:
             kwargs = dict(kwargs)
             kwargs.pop("use_videos", None)
             return dataset_cls.create(**kwargs)
+
+
+class DualLeRobotEpisodeRecorder:
+    """Write one episode to a raw dataset and a preprocessed dataset in parallel."""
+
+    def __init__(
+        self,
+        raw_recorder: LeRobotEpisodeRecorder,
+        augmented_recorder: LeRobotEpisodeRecorder,
+    ) -> None:
+        self.raw_recorder = raw_recorder
+        self.augmented_recorder = augmented_recorder
+
+    @property
+    def episode_dirs(self) -> list[Path]:
+        return [Path(self.raw_recorder.episode_dir), Path(self.augmented_recorder.episode_dir)]
+
+    def __enter__(self) -> "DualLeRobotEpisodeRecorder":
+        self.raw_recorder.__enter__()
+        self.augmented_recorder.__enter__()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.augmented_recorder.__exit__(exc_type, exc, tb)
+        self.raw_recorder.__exit__(exc_type, exc, tb)
+
+    def record_frame(
+        self,
+        raw_observation: dict[str, Any],
+        raw_action: dict[str, Any],
+        augmented_observation: dict[str, Any],
+        augmented_action: dict[str, Any],
+    ) -> None:
+        self.raw_recorder.record_frame(observation=raw_observation, action=raw_action)
+        self.augmented_recorder.record_frame(
+            observation=augmented_observation,
+            action=augmented_action,
+        )

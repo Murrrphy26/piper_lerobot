@@ -10,7 +10,12 @@ import torch
 from lerobot.cameras.opencv import OpenCVCameraConfig
 
 from .config import PiperRobotConfig
-from .offline_infer import action_tensor_to_dict, load_dataset, load_policy
+from .offline_infer import (
+    action_tensor_to_dict,
+    inference_options_from_namespace,
+    load_dataset,
+    load_policy,
+)
 from .piper import PiperRobot
 from .preprocessing import FramePreprocessor, load_preprocessing_config
 from .recorder import ARM_STATE_KEYS
@@ -173,6 +178,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration", type=float, default=10.0, help="Run duration in seconds.")
     parser.add_argument("--fps", type=float, default=10.0, help="Policy control frequency.")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--inference-dtype",
+        default=None,
+        choices=("bfloat16", "float32"),
+        help="Override checkpoint dtype for inference (e.g. bfloat16 to reduce VRAM).",
+    )
+    parser.add_argument(
+        "--compile-model",
+        default=None,
+        help="Override torch.compile during inference (false reduces peak VRAM).",
+    )
+    parser.add_argument(
+        "--num-inference-steps",
+        type=int,
+        default=None,
+        help="Override flow-matching denoising steps (lower values use less VRAM).",
+    )
     parser.add_argument("--follower-left-can", default="can2")
     parser.add_argument("--follower-right-can", default="can0")
     parser.add_argument("--camera-indices", default="2,4,0")
@@ -229,12 +251,16 @@ def run_live_policy(args: argparse.Namespace) -> None:
         gripper_effort=args.gripper_effort,
     )
 
-    policy_config, policy, make_pre_post_processors = load_policy(args.policy_path, args.device)
+    policy_config, policy, make_pre_post_processors = load_policy(
+        args.policy_path,
+        args.device,
+        **inference_options_from_namespace(args),
+    )
     dataset_stats = load_dataset_stats(args)
-    preprocessing = getattr(args, "preprocessing", None)
+    preprocessing_config = load_preprocessing_config(getattr(args, "preprocessing", None))
     frame_preprocessor = (
-        FramePreprocessor(load_preprocessing_config(preprocessing), mode="online")
-        if preprocessing is not None
+        FramePreprocessor(preprocessing_config, mode="online")
+        if preprocessing_config.active
         else None
     )
     if frame_preprocessor is not None and frame_preprocessor.enabled:

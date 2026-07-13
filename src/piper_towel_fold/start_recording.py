@@ -49,9 +49,8 @@ def build_namespace(config: dict) -> argparse.Namespace:
     for key, value in config.items():
         if key in SKIP_CONFIG_KEYS:
             continue
-        if not hasattr(args, key):
-            raise ValueError(f"Unsupported config key: {key}")
-        setattr(args, key, value)
+        if hasattr(args, key):
+            setattr(args, key, value)
 
     args.preprocessing = config.get("preprocessing")
     return args

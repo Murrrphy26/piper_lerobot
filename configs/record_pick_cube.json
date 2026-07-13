@@ -1,7 +1,7 @@
 {
-  "task": "cube_v6_processed",
+  "task": "cube_v4_3view_side",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_v6_processed",
+  "repo_id": "local/cube_v4_3view_side",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
@@ -21,11 +21,18 @@
   "image_quality": 95,
   "action_source": "auto",
   "training": {
-    "policy_type": "act",
-    "job_name": "act_cube_v6_processed",
-    "output_dir": "outputs/train/act_cube_v6_processed",
+    "policy_type": "act_piper",
+    "job_name": "act_piper_cube_v4_3view_side",
+    "output_dir": "outputs/train/act_piper_cube_v4_3view_side",
+    "camera_scales": {
+      "cam_right": 2.0,
+      "cam_side": 0.9,
+      "cam_top": 0.8
+    },
+    "learnable_camera_scales": false,
+    "use_camera_id_embed": true,
     "device": "cuda",
-    "steps": 15000,
+    "steps": 10000,
     "batch_size": 4,
     "log_freq": 100,
     "save_freq": 1000,
@@ -37,9 +44,9 @@
     "push_to_hub": false
   },
   "policy_live": {
-    "policy_path": "outputs/train/act_cube_v6_processed/checkpoints/005000/pretrained_model",
-    "repo_id": "local/cube_v6_processed",
-    "dataset_root": "data/lerobot/local/cube_v6_processed",
+    "policy_path": "outputs/train/act_piper_cube_v4_3view_side/checkpoints/010000/pretrained_model",
+    "repo_id": "local/cube_v4_3view_side",
+    "dataset_root": "data/lerobot/local/cube_v4_3view_side",
     "video_backend": "pyav",
     "device": "cuda",
     "execute": true,
@@ -71,26 +78,6 @@
     }
   ],
   "preprocessing": {
-    "enabled": true,
-    "images": {
-      "enabled": true,
-      "white_balance": true,
-      "clahe_clip_limit": 2.0,
-      "clahe_tile_grid_size": 8,
-      "orange_boost": {
-        "enabled": true,
-        "hue_range": [5, 25],
-        "sat_scale": 1.2,
-        "val_scale": 1.05
-      }
-    },
-    "smoothing": {
-      "enabled": true,
-      "method": "ema",
-      "ema_alpha": 0.25,
-      "gripper_ema_alpha": 0.35,
-      "savgol_window": 7,
-      "savgol_polyorder": 2
-    }
+    "enabled": false
   }
 }

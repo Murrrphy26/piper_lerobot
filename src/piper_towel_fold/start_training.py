@@ -152,8 +152,61 @@ def command_from_config(config: dict[str, Any], training: dict[str, Any], path: 
     if "tolerance_s" in training:
         cmd.append(f"--tolerance_s={training['tolerance_s']}")
 
+    append_act_piper_policy_options(cmd, training)
+    append_pi05_policy_options(cmd, training)
     append_training_episodes(cmd, path, training)
     return cmd
+
+
+def append_pi05_policy_options(cmd: list[str], training: dict[str, Any]) -> None:
+    if training.get("policy_type") != "pi05":
+        return
+
+    if training.get("pretrained_path"):
+        cmd.append(f"--policy.pretrained_path={training['pretrained_path']}")
+
+    if "dtype" in training:
+        cmd.append(f"--policy.dtype={training['dtype']}")
+
+    if "compile_model" in training:
+        cmd.append(f"--policy.compile_model={str(training['compile_model']).lower()}")
+
+    if "gradient_checkpointing" in training:
+        cmd.append(
+            f"--policy.gradient_checkpointing={str(training['gradient_checkpointing']).lower()}"
+        )
+
+    if "freeze_vision_encoder" in training:
+        cmd.append(
+            f"--policy.freeze_vision_encoder={str(training['freeze_vision_encoder']).lower()}"
+        )
+
+    if "train_expert_only" in training:
+        cmd.append(f"--policy.train_expert_only={str(training['train_expert_only']).lower()}")
+
+    normalization_mapping = training.get("normalization_mapping")
+    if normalization_mapping:
+        cmd.append(f"--policy.normalization_mapping={json.dumps(normalization_mapping)}")
+
+    if "use_relative_actions" in training:
+        cmd.append(f"--policy.use_relative_actions={str(training['use_relative_actions']).lower()}")
+
+
+def append_act_piper_policy_options(cmd: list[str], training: dict[str, Any]) -> None:
+    if training.get("policy_type") != "act_piper":
+        return
+
+    camera_scales = training.get("camera_scales")
+    if camera_scales:
+        cmd.append(f"--policy.camera_scales={json.dumps(camera_scales)}")
+
+    if "learnable_camera_scales" in training:
+        cmd.append(
+            f"--policy.learnable_camera_scales={str(training['learnable_camera_scales']).lower()}"
+        )
+
+    if "use_camera_id_embed" in training:
+        cmd.append(f"--policy.use_camera_id_embed={str(training['use_camera_id_embed']).lower()}")
 
 
 def main() -> None:
