@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .train_loss import report_from_log
+
 
 DEFAULTS: dict[str, Any] = {
     "policy_type": "act",
@@ -23,6 +25,8 @@ DEFAULTS: dict[str, Any] = {
     "include_unknown": False,
     "exclude_unlabeled": True,
     "push_to_hub": False,
+    # 训完后自动根据 train.log 打印 loss 收敛判断（ACT / PI05 通用）
+    "report_loss_on_finish": True,
 }
 
 
@@ -208,6 +212,49 @@ def append_act_piper_policy_options(cmd: list[str], training: dict[str, Any]) ->
     if "use_camera_id_embed" in training:
         cmd.append(f"--policy.use_camera_id_embed={str(training['use_camera_id_embed']).lower()}")
 
+    if "chunk_size" in training:
+        cmd.append(f"--policy.chunk_size={int(training['chunk_size'])}")
+
+    if "n_action_steps" in training:
+        cmd.append(f"--policy.n_action_steps={int(training['n_action_steps'])}")
+
+
+def resolve_output_dir(config: dict[str, Any], training: dict[str, Any]) -> Path:
+    repo_id = str(config["repo_id"])
+    policy_type = str(training["policy_type"])
+    job_name = str(training.get("job_name") or f"{policy_type}_{repo_id.split('/')[-1]}")
+    return Path(str(training.get("output_dir") or Path("outputs") / "train" / job_name))
+
+
+def run_training_with_log(command: list[str], env: dict[str, str], log_path: Path) -> None:
+    """Run lerobot-train, stream stdout live, and tee into log_path."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"  train log: {log_path}")
+    print()
+
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        try:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                log_file.write(line)
+                log_file.flush()
+        finally:
+            process.stdout.close()
+            returncode = process.wait()
+
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, command)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start LeRobot training from a JSON recording config.")
@@ -217,6 +264,11 @@ def main() -> None:
         help="Path to the JSON config file.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the command without running it.")
+    parser.add_argument(
+        "--no-loss-report",
+        action="store_true",
+        help="Skip post-training loss convergence report.",
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -225,6 +277,11 @@ def main() -> None:
     validate_dataset(path)
 
     command = command_from_config(config, training, path)
+    output_dir = resolve_output_dir(config, training)
+    # Keep the train log beside output_dir so we do not create output_dir before
+    # lerobot-train (it refuses to start if the directory already exists).
+    log_path = output_dir.parent / f"{output_dir.name}.train.log"
+
     print("Training policy")
     print(f"  dataset: {config['repo_id']}")
     print(f"  dataset root: {path}")
@@ -232,6 +289,7 @@ def main() -> None:
     print(f"  steps: {training['steps']}")
     print(f"  batch size: {training['batch_size']}")
     print(f"  video backend: {training['video_backend']}")
+    print(f"  output dir: {output_dir}")
     print()
     print(" ".join(command))
 
@@ -243,7 +301,16 @@ def main() -> None:
 
     env = os.environ.copy()
     env.setdefault("PYTORCH_CUDA_ALLOC_CONF", str(training["pytorch_alloc_conf"]))
-    subprocess.run(command, check=True, env=env)
+    run_training_with_log(command, env, log_path)
+
+    should_report = bool(training.get("report_loss_on_finish", True)) and not args.no_loss_report
+    if should_report:
+        log_freq = training.get("log_freq")
+        report_from_log(
+            log_path,
+            output_dir=output_dir,
+            log_freq=int(log_freq) if log_freq is not None else None,
+        )
 
 
 if __name__ == "__main__":

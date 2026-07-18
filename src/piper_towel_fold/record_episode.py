@@ -231,8 +231,15 @@ def run_recording(args: argparse.Namespace) -> None:
 
     camera_configs = make_camera_configs(args)
     action_source = resolve_action_source(args)
-    if action_source == "leader" and not (args.leader_left_can and args.leader_right_can):
-        raise ValueError("Leader action recording requires both --leader-left-can and --leader-right-can.")
+    if action_source == "leader":
+        # 共 CAN 时可只配 follower：从同一总线 sniff GetArm*Ctrl 作为主臂 action。
+        has_leader = bool(args.leader_left_can or args.leader_right_can)
+        has_follower = bool(args.follower_left_can or args.follower_right_can)
+        if not (has_leader or has_follower):
+            raise ValueError(
+                "Leader action recording needs at least one CAN "
+                "(--leader-*-can and/or --follower-*-can) to sniff GetArm*Ctrl."
+            )
 
     config = PiperRobotConfig(
         leader_left_port=args.leader_left_can,
@@ -268,13 +275,18 @@ def run_recording(args: argparse.Namespace) -> None:
         print("Frame preprocessing enabled for recording.")
     if action_source == "leader":
         print("Leader-follower teleop recording enabled.")
-        print(f"  observation: follower ({args.follower_left_can}, {args.follower_right_can})")
-        print(f"  action: leader ({args.leader_left_can}, {args.leader_right_can})")
+        print(f"  observation: follower feedback GetArm*Msgs ({args.follower_left_can}, {args.follower_right_can})")
+        print(
+            "  action: leader command GetArm*Ctrl "
+            f"({args.leader_left_can or args.follower_left_can}, "
+            f"{args.leader_right_can or args.follower_right_can})"
+        )
+        print("  Keep leader aviation plugs connected; do NOT unplug masters or run reset while recording.")
         print("  Move the leader arms; followers should track via Piper teleop.")
     else:
         print("Follower recording enabled (observation and action from follower CAN).")
         print(f"  follower CAN: left={args.follower_left_can}, right={args.follower_right_can}")
-        print("  With same-CAN leader teleop, move the leader arms; follower states are recorded.")
+        print("  Both observation and action come from follower feedback (GetArm*Msgs).")
     stop_reason = "completed"
     dataset_paths: list[Path] = []
     stop_requested, previous_sigint_handler = install_stop_handler()

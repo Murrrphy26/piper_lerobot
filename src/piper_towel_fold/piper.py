@@ -126,7 +126,12 @@ class PiperRobot(Robot):
             return bool(get_status())
         return True
 
+    @staticmethod
+    def _joints_mdeg_to_rad(joints_mdeg: list[float | int]) -> list[float]:
+        return [math.radians(float(value) / 1000.0) for value in joints_mdeg]
+
     def _read_joint_positions(self, arm: object | None) -> list[float]:
+        """从臂反馈（CAN feedback 2Ax）：实际关节位置。"""
         if arm is None:
             return [0.0] * 6
 
@@ -139,14 +144,42 @@ class PiperRobot(Robot):
             joint_state.joint_5,
             joint_state.joint_6,
         ]
-        return [math.radians(value / 1000.0) for value in joints_mdeg]
+        return self._joints_mdeg_to_rad(joints_mdeg)
+
+    def _read_joint_ctrl_positions(self, arm: object | None) -> list[float]:
+        """主臂指令（CAN control 15x）：发给从臂的目标关节角。
+
+        共 CAN 示教时，SDK 用 GetArmJointCtrl 承接主臂下发的目标值。
+        """
+        if arm is None:
+            return [0.0] * 6
+
+        joint_ctrl = arm.GetArmJointCtrl().joint_ctrl
+        joints_mdeg = [
+            joint_ctrl.joint_1,
+            joint_ctrl.joint_2,
+            joint_ctrl.joint_3,
+            joint_ctrl.joint_4,
+            joint_ctrl.joint_5,
+            joint_ctrl.joint_6,
+        ]
+        return self._joints_mdeg_to_rad(joints_mdeg)
 
     def _read_gripper_position(self, arm: object | None) -> float:
+        """从臂夹爪反馈，单位米。"""
         if arm is None:
             return 0.0
 
         gripper_state = arm.GetArmGripperMsgs().gripper_state
         return gripper_state.grippers_angle / 1_000_000.0
+
+    def _read_gripper_ctrl_position(self, arm: object | None) -> float:
+        """主臂夹爪指令，单位米。"""
+        if arm is None:
+            return 0.0
+
+        gripper_ctrl = arm.GetArmGripperCtrl().gripper_ctrl
+        return gripper_ctrl.grippers_angle / 1_000_000.0
 
     def _read_arm_state(self, arm: object | None, side: str) -> dict[str, float]:
         state: dict[str, float] = {}
@@ -155,6 +188,19 @@ class PiperRobot(Robot):
             state[f"{side}_joint_{index}.pos"] = position
         state[f"{side}_gripper.pos"] = self._read_gripper_position(arm)
         return state
+
+    def _read_arm_ctrl(self, arm: object | None, side: str) -> dict[str, float]:
+        """读取主臂示教指令（观测用反馈请用 _read_arm_state）。"""
+        state: dict[str, float] = {}
+        joints = self._read_joint_ctrl_positions(arm)
+        for index, position in enumerate(joints, start=1):
+            state[f"{side}_joint_{index}.pos"] = position
+        state[f"{side}_gripper.pos"] = self._read_gripper_ctrl_position(arm)
+        return state
+
+    def _bus_arm_for_leader(self, side: str) -> object | None:
+        """共 CAN 时 leader/follower 可能指向同一口；优先 leader，否则 sniff follower。"""
+        return self._leaders[side] or self._followers[side]
 
     def _limited_value(self, target: float, current: float, max_step: float) -> float:
         return float(np.clip(target, current - max_step, current + max_step))
@@ -219,9 +265,10 @@ class PiperRobot(Robot):
 
     @check_if_not_connected
     def get_leader_action(self) -> RobotAction:
+        """主臂 action：读总线控制帧 GetArm*Ctrl，而非从臂反馈 GetArm*Msgs。"""
         action: RobotAction = {}
         for side in ("left", "right"):
-            action.update(self._read_arm_state(self._leaders[side], side))
+            action.update(self._read_arm_ctrl(self._bus_arm_for_leader(side), side))
         return action
 
     @check_if_not_connected

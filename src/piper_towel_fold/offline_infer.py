@@ -125,6 +125,18 @@ def load_policy(
     except ImportError:
         from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 
+    # lerobot-train calls this automatically; live/offline inference must too,
+    # otherwise third-party types like act_piper are unknown to PreTrainedConfig.
+    try:
+        from lerobot.utils.import_utils import register_third_party_plugins
+
+        register_third_party_plugins()
+    except ImportError:
+        try:
+            import lerobot_policy_act_piper  # noqa: F401
+        except ImportError:
+            pass
+
     config = PreTrainedConfig.from_pretrained(
         policy_path,
         local_files_only=True,

@@ -11,13 +11,15 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from typing import Any
 
 import grpc
 import torch
 
 from .async_features import action_names_from_dataset, observation_features_from_dataset
+from .async_image_codec import compress_observation_images
+from .async_latency import LatencyTracker
 from .config import PiperRobotConfig
 from .piper import PiperRobot
 from .preprocessing import FramePreprocessor, load_preprocessing_config
@@ -156,6 +158,19 @@ class PiperAsyncRobotClient:
         self.must_go.set()
         self.aggregate_fn = get_aggregate_function(args.aggregate_fn_name)
 
+        self.latency = LatencyTracker(
+            enabled=getattr(args, "log_latency", True),
+            log_jsonl=getattr(args, "latency_log_jsonl", "") or "",
+        )
+        self._pending_obs_lock = threading.Lock()
+        self._pending_obs_sent_at: dict[int, float] = {}
+        self._obs_outbound_queue: Queue[tuple[Any, float]] = Queue(maxsize=2)
+        self._obs_sender_thread: threading.Thread | None = None
+
+        compression = str(getattr(args, "obs_image_compression", "jpeg") or "none").lower()
+        self._obs_image_compression = compression if compression in {"jpeg", "none"} else "none"
+        self._obs_jpeg_quality = int(getattr(args, "obs_jpeg_quality", 85))
+
         preprocessing_config = load_preprocessing_config(getattr(args, "preprocessing", None))
         self.frame_preprocessor = (
             FramePreprocessor(preprocessing_config, mode="online")
@@ -166,6 +181,25 @@ class PiperAsyncRobotClient:
     @property
     def running(self) -> bool:
         return not self.shutdown_event.is_set()
+
+    def benchmark_network_rtt(self, samples: int = 5, timeout_s: float = 10.0) -> None:
+        if samples <= 0:
+            return
+        timings_ms: list[float] = []
+        print(f"Benchmarking gRPC RTT to {self.args.server_address} ({samples} x Ready)...", flush=True)
+        for index in range(samples):
+            started = time.perf_counter()
+            self.stub.Ready(self._services_pb2.Empty(), timeout=timeout_s)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            timings_ms.append(elapsed_ms)
+            self.latency.record_network_rtt(elapsed_ms)
+            print(f"  Ready #{index + 1}: {elapsed_ms:.1f} ms", flush=True)
+        if timings_ms:
+            avg_ms = sum(timings_ms) / len(timings_ms)
+            self.logger.info(
+                f"gRPC RTT benchmark | min={min(timings_ms):.1f}ms "
+                f"avg={avg_ms:.1f}ms max={max(timings_ms):.1f}ms"
+            )
 
     def start(self) -> bool:
         try:
@@ -201,15 +235,39 @@ class PiperAsyncRobotClient:
             self.channel.close()
         except Exception:
             pass
+        if self._obs_sender_thread is not None:
+            self._obs_sender_thread.join(timeout=3.0)
         if self.robot.is_connected:
             self.robot.disconnect()
+        self.latency.print_summary()
+        self.latency.close()
 
-    def send_observation(self, obs: Any) -> bool:
+    def _prepare_observation_for_wire(self, obs: Any) -> Any:
+        if self._obs_image_compression != "jpeg":
+            return obs
+        compressed_observation = compress_observation_images(
+            obs.get_observation(),
+            quality=self._obs_jpeg_quality,
+        )
+        return self._TimedObservation(
+            timestamp=obs.get_timestamp(),
+            timestep=obs.get_timestep(),
+            observation=compressed_observation,
+            must_go=bool(getattr(obs, "must_go", False)),
+        )
+
+    def send_observation(self, obs: Any) -> tuple[bool, float, float, float]:
         if not self.running:
             raise RuntimeError("Client not running.")
 
+        serialize_started = time.perf_counter()
+        wire_obs = self._prepare_observation_for_wire(obs)
+        observation_bytes = pickle.dumps(wire_obs)
+        serialize_ms = (time.perf_counter() - serialize_started) * 1000.0
+        payload_mb = len(observation_bytes) / (1024.0 * 1024.0)
+
         try:
-            observation_bytes = pickle.dumps(obs)
+            grpc_started = time.perf_counter()
             observation_iterator = self._send_bytes_in_chunks(
                 observation_bytes,
                 self._services_pb2.Observation,
@@ -217,10 +275,56 @@ class PiperAsyncRobotClient:
                 silent=True,
             )
             self.stub.SendObservations(observation_iterator)
-            return True
+            grpc_ms = (time.perf_counter() - grpc_started) * 1000.0
+            return True, payload_mb, serialize_ms, grpc_ms
         except grpc.RpcError as exc:
             self.logger.error(f"Error sending observation #{obs.get_timestep()}: {exc}")
-            return False
+            return False, payload_mb, serialize_ms, 0.0
+
+    def _observation_sender_loop(self) -> None:
+        while self.running:
+            try:
+                timed_observation, capture_ms = self._obs_outbound_queue.get(timeout=0.5)
+            except Empty:
+                continue
+
+            obs_timestep = timed_observation.get_timestep()
+            success, payload_mb, serialize_ms, grpc_ms = self.send_observation(timed_observation)
+            self.latency.record_obs_send(
+                obs_timestep,
+                payload_mb=payload_mb,
+                serialize_ms=serialize_ms,
+                grpc_ms=grpc_ms,
+                success=success,
+            )
+            if success:
+                with self._pending_obs_lock:
+                    self._pending_obs_sent_at[obs_timestep] = time.monotonic()
+                self.logger.info(
+                    f"Sent observation #{obs_timestep} | must_go={timed_observation.must_go} | "
+                    f"payload={payload_mb:.2f}MB | compression={self._obs_image_compression} | "
+                    f"capture={capture_ms:.0f}ms | "
+                    f"upload={serialize_ms + grpc_ms:.0f}ms "
+                    f"(serialize={serialize_ms:.0f}ms grpc={grpc_ms:.0f}ms)"
+                )
+            else:
+                self.logger.warning(
+                    f"Failed to send observation #{obs_timestep} | payload={payload_mb:.2f}MB"
+                )
+
+            if timed_observation.must_go:
+                self.must_go.clear()
+            self._obs_outbound_queue.task_done()
+
+    def start_observation_sender(self) -> None:
+        if self._obs_sender_thread is not None and self._obs_sender_thread.is_alive():
+            return
+        self._obs_sender_thread = threading.Thread(
+            target=self._observation_sender_loop,
+            daemon=True,
+            name="observation-sender",
+        )
+        self._obs_sender_thread.start()
 
     def _aggregate_action_queues(
         self,
@@ -282,12 +386,30 @@ class PiperAsyncRobotClient:
             f"Received action chunk steps [{first_step}, {last_step}] | queue_size={queue_size}"
         )
 
+        receive_time = time.time()
+        with self._pending_obs_lock:
+            sent_at = self._pending_obs_sent_at.pop(first_step, None)
+        if sent_at is not None:
+            obs_to_action_ms = (time.monotonic() - sent_at) * 1000.0
+            self.latency.record_obs_to_action(first_step, obs_to_action_ms)
+            self.logger.info(
+                f"Latency obs #{first_step} -> action chunk: {obs_to_action_ms:.0f}ms"
+            )
+
+        server_to_client_ms = (receive_time - timed_actions[0].get_timestamp()) * 1000.0
+        if server_to_client_ms >= 0:
+            self.latency.record_server_to_client(first_step, server_to_client_ms)
+            self.logger.info(
+                f"Latency server stamp -> client receive: {server_to_client_ms:.0f}ms"
+            )
+
     def receive_actions(self) -> None:
         self.start_barrier.wait()
         self.logger.info("Action receiver thread started")
 
         while self.running:
             try:
+                self.latency.begin_getactions_wait()
                 actions_chunk = self.stub.GetActions(
                     self._services_pb2.Empty(),
                     timeout=20.0,
@@ -295,7 +417,14 @@ class PiperAsyncRobotClient:
                 if not self.running:
                     break
                 if len(actions_chunk.data) == 0:
+                    self.latency.record_getactions_empty()
+                    self.logger.warning(
+                        "GetActions returned empty "
+                        "(server waiting for obs, obs filtered, or obs_queue_timeout elapsed)"
+                    )
                     continue
+
+                self.latency.finish_getactions_wait()
 
                 timed_actions = pickle.loads(actions_chunk.data)  # nosec
                 self.action_chunk_size = max(self.action_chunk_size, len(timed_actions))
@@ -335,11 +464,13 @@ class PiperAsyncRobotClient:
 
         return action_tensor_to_dict(timed_action.get_action(), self.action_names)
 
-    def capture_and_send_observation(self, task: str, *, force: bool = False) -> dict[str, Any]:
-        observation = self.robot.get_observation()
-        if self.frame_preprocessor is not None and self.frame_preprocessor.enabled:
-            observation = self.frame_preprocessor.process_observation(observation, self.camera_names)
-
+    def _build_timed_observation(
+        self,
+        task: str,
+        observation: dict[str, Any],
+        *,
+        force: bool,
+    ) -> Any:
         with self.latest_action_lock:
             latest_action = self.latest_action
 
@@ -350,21 +481,98 @@ class PiperAsyncRobotClient:
         )
 
         with self.action_queue_lock:
-            queue_size = self.action_queue.qsize()
             if force:
                 timed_observation.must_go = True
             else:
                 timed_observation.must_go = self.must_go.is_set() and self.action_queue.empty()
 
-        self.send_observation(timed_observation)
-        self.logger.info(
-            f"Sent observation #{timed_observation.get_timestep()} | "
-            f"must_go={timed_observation.must_go} | queue_size={queue_size}"
-        )
-        if timed_observation.must_go:
-            self.must_go.clear()
+        return timed_observation
 
+    def enqueue_observation(
+        self,
+        task: str,
+        *,
+        force: bool = False,
+        observation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        capture_started = time.perf_counter()
+        if observation is None:
+            observation = self.robot.get_observation()
+        if self.frame_preprocessor is not None and self.frame_preprocessor.enabled:
+            observation = self.frame_preprocessor.process_observation(observation, self.camera_names)
+        capture_ms = (time.perf_counter() - capture_started) * 1000.0
+
+        timed_observation = self._build_timed_observation(task, observation, force=force)
+        self.latency.record_obs_capture(timed_observation.get_timestep(), capture_ms)
+
+        with self.action_queue_lock:
+            queue_size = self.action_queue.qsize()
+
+        payload = (timed_observation, capture_ms)
+        if self._obs_outbound_queue.full():
+            try:
+                dropped, _ = self._obs_outbound_queue.get_nowait()
+                self.logger.warning(
+                    f"Dropped pending observation #{dropped.get_timestep()} "
+                    f"because upload queue is full"
+                )
+            except Empty:
+                pass
+        self._obs_outbound_queue.put(payload)
+        self.logger.info(
+            f"Queued observation #{timed_observation.get_timestep()} | "
+            f"must_go={timed_observation.must_go} | queue_size={queue_size} | "
+            f"capture={capture_ms:.0f}ms"
+        )
         return observation
+
+    def capture_and_send_observation(
+        self,
+        task: str,
+        *,
+        force: bool = False,
+        observation: dict[str, Any] | None = None,
+        blocking: bool = False,
+    ) -> dict[str, Any]:
+        if blocking or self._obs_sender_thread is None:
+            capture_started = time.perf_counter()
+            if observation is None:
+                observation = self.robot.get_observation()
+            if self.frame_preprocessor is not None and self.frame_preprocessor.enabled:
+                observation = self.frame_preprocessor.process_observation(
+                    observation, self.camera_names
+                )
+            capture_ms = (time.perf_counter() - capture_started) * 1000.0
+
+            timed_observation = self._build_timed_observation(task, observation, force=force)
+            self.latency.record_obs_capture(timed_observation.get_timestep(), capture_ms)
+
+            with self.action_queue_lock:
+                queue_size = self.action_queue.qsize()
+
+            success, payload_mb, serialize_ms, grpc_ms = self.send_observation(timed_observation)
+            self.latency.record_obs_send(
+                timed_observation.get_timestep(),
+                payload_mb=payload_mb,
+                serialize_ms=serialize_ms,
+                grpc_ms=grpc_ms,
+                success=success,
+            )
+            if success:
+                with self._pending_obs_lock:
+                    self._pending_obs_sent_at[timed_observation.get_timestep()] = time.monotonic()
+                self.logger.info(
+                    f"Sent observation #{timed_observation.get_timestep()} | "
+                    f"must_go={timed_observation.must_go} | queue_size={queue_size} | "
+                    f"payload={payload_mb:.2f}MB | compression={self._obs_image_compression} | "
+                    f"capture={capture_ms:.0f}ms | "
+                    f"upload={serialize_ms + grpc_ms:.0f}ms"
+                )
+            if timed_observation.must_go:
+                self.must_go.clear()
+            return observation
+
+        return self.enqueue_observation(task, force=force, observation=observation)
 
     def run_control_loop(self, stop_requested: dict[str, bool]) -> None:
         self.start_barrier.wait()
@@ -442,7 +650,11 @@ class PiperAsyncRobotClient:
                         )
 
                 if self._ready_to_send_observation():
-                    self.capture_and_send_observation(self.args.task, force=True)
+                    self.enqueue_observation(
+                        self.args.task,
+                        force=True,
+                        observation=current_observation,
+                    )
 
                 elapsed = time.monotonic() - loop_started_at
                 sleep_remaining = max(0.0, period - elapsed)
@@ -495,6 +707,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Plot action queue size after the run finishes.",
     )
+    parser.add_argument(
+        "--network-benchmark-samples",
+        type=int,
+        default=5,
+        help="Ready() RTT samples before connecting (0 to skip).",
+    )
+    parser.add_argument(
+        "--log-latency",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Print latency summary and per-chunk timing logs.",
+    )
+    parser.add_argument(
+        "--latency-log-jsonl",
+        default="",
+        help="Optional JSONL path for detailed latency events.",
+    )
+    parser.add_argument(
+        "--obs-image-compression",
+        default="jpeg",
+        choices=("jpeg", "none"),
+        help="Compress camera frames before gRPC upload (jpeg recommended for remote).",
+    )
+    parser.add_argument(
+        "--obs-jpeg-quality",
+        type=int,
+        default=85,
+        help="JPEG quality 1-100 when --obs-image-compression=jpeg.",
+    )
     return parser
 
 
@@ -507,6 +748,8 @@ def run_async_live_policy(args: argparse.Namespace) -> None:
         raise ValueError("--actions-per-chunk must be greater than 0.")
     if not 0.0 <= args.chunk_size_threshold <= 1.0:
         raise ValueError("--chunk-size-threshold must be in [0, 1].")
+    if not 1 <= int(args.obs_jpeg_quality) <= 100:
+        raise ValueError("--obs-jpeg-quality must be in [1, 100].")
 
     client = PiperAsyncRobotClient(args)
 
@@ -526,20 +769,29 @@ def run_async_live_policy(args: argparse.Namespace) -> None:
     print(f"  policy device (remote): {args.policy_device}")
     print(f"  fps: {args.fps}")
     print(f"  cameras: {', '.join(client.camera_names)}")
+    print(
+        f"  obs compression: {args.obs_image_compression}"
+        + (f" q={args.obs_jpeg_quality}" if args.obs_image_compression == "jpeg" else "")
+    )
     if not args.execute:
         print("  no actions will be sent; add --execute only after dry-run output looks sane")
     print("Press Ctrl+C to stop.")
     print()
 
+    benchmark_samples = getattr(args, "network_benchmark_samples", 0)
+    if benchmark_samples > 0:
+        client.benchmark_network_rtt(samples=benchmark_samples)
+
     if not client.start():
         raise RuntimeError(f"Could not connect to policy server at {args.server_address}")
 
-    print("Remote policy loaded. Connecting robot and sending bootstrap observation...", flush=True)
+    print("Remote policy loaded. Connecting robot...", flush=True)
     client.robot.connect()
     if client.frame_preprocessor is not None:
         client.frame_preprocessor.reset()
+    client.start_observation_sender()
     client.must_go.set()
-    client.capture_and_send_observation(args.task, force=True)
+    client.capture_and_send_observation(args.task, force=True, blocking=True)
     print("Bootstrap observation sent. Starting action receiver...", flush=True)
 
     receiver_thread = threading.Thread(target=client.receive_actions, daemon=True)

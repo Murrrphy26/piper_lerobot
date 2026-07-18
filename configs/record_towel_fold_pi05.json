@@ -1,7 +1,7 @@
 {
-  "task": "pick up the orange cube from the table and put it in the bowl",
+  "task": "fold the blue towel",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_pi05_v5",
+  "repo_id": "local/towel_pi05_v1",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
@@ -23,8 +23,8 @@
   "recording_notes": "",
   "training": {
     "policy_type": "pi05",
-    "job_name": "pi05_cube_pi05_v5",
-    "output_dir": "outputs/train/pi05_cube_pi05_v5",
+    "job_name": "pi05_towel_pi05_v1",
+    "output_dir": "outputs/train/pi05_towel_pi05_v1",
     "pretrained_path": "lerobot/pi05_base",
     "dtype": "bfloat16",
     "compile_model": true,
@@ -49,9 +49,9 @@
     "push_to_hub": false
   },
   "policy_live": {
-    "policy_path": "outputs/train/pi05_cube_pi05_v5/checkpoints/last/pretrained_model",
-    "repo_id": "local/cube_pi05_v5",
-    "dataset_root": "data/lerobot/local/cube_pi05_v5",
+    "policy_path": "outputs/train/pi05_towel_pi05_v1/checkpoints/last/pretrained_model",
+    "repo_id": "local/towel_pi05_v1",
+    "dataset_root": "data/lerobot/local/towel_pi05_v1",
     "video_backend": "pyav",
     "device": "cuda",
     "inference_dtype": "bfloat16",
@@ -77,12 +77,12 @@
       "ref": 8
     },
     {
-      "name": "cam_side",
-      "ref": 6
-    },
-    {
       "name": "cam_top",
       "ref": 10
+    },
+    {
+      "name": "cam_left",
+      "ref": 12
     }
   ],
   "preprocessing": {

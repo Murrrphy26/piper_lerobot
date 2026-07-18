@@ -94,6 +94,11 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
         "print_every": "print_every",
         "log_jsonl": "log_jsonl",
         "debug_visualize_queue_size": "debug_visualize_queue_size",
+        "network_benchmark_samples": "network_benchmark_samples",
+        "log_latency": "log_latency",
+        "latency_log_jsonl": "latency_log_jsonl",
+        "obs_image_compression": "obs_image_compression",
+        "obs_jpeg_quality": "obs_jpeg_quality",
     }
     for config_key, attr_name in async_key_map.items():
         if config_key in async_cfg and hasattr(args, attr_name):

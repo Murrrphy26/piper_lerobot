@@ -2,8 +2,8 @@
 set -euo pipefail
 
 CONFIG_PATH="${1:-configs/record_pick_cube_pi05.json}"
-SKIP_BRINGUP="${SKIP_BRINGUP:-false}"
-SKIP_RESET="${SKIP_RESET:-false}"
+SKIP_BRINGUP="${SKIP_BRINGUP:-true}"
+SKIP_RESET="${SKIP_RESET:-true}"
 if [[ $# -gt 0 ]]; then
   shift
 fi

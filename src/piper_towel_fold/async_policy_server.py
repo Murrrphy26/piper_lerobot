@@ -13,6 +13,10 @@ from typing import Any
 import grpc
 
 from .async_features import observation_features_from_dataset
+from .async_image_codec import (
+    decompress_observation_images,
+    observation_has_jpeg_payloads,
+)
 from .offline_infer import load_policy
 
 
@@ -63,6 +67,7 @@ class PiperPolicyServer:
         self._policy_preloaded = False
         self._preloaded_policy_path: str | None = None
         self._patch_send_policy_instructions()
+        self._patch_send_observations()
 
     def _apply_policy_specs(
         self,
@@ -183,6 +188,71 @@ class PiperPolicyServer:
             return self._services_pb2.Empty()
 
         self._server.SendPolicyInstructions = send_policy_instructions
+        _ = original
+
+    def _patch_send_observations(self) -> None:
+        """Decode Piper JPEG image payloads before LeRobot enqueue/inference."""
+        original = self._server.SendObservations
+
+        def send_observations(request_iterator, context):  # noqa: N802
+            from lerobot.async_inference.helpers import TimedObservation
+            from lerobot.transport.utils import receive_bytes_in_chunks
+
+            if not self._server.running:
+                self.logger.warning("Server is not running. Ignoring observations.")
+                return self._services_pb2.Empty()
+
+            client_id = context.peer()
+            self.logger.debug(f"Receiving observations from {client_id}")
+
+            receive_time = time.time()
+            start_deserialize = time.perf_counter()
+            received_bytes = receive_bytes_in_chunks(
+                request_iterator,
+                None,
+                self._server.shutdown_event,
+                self.logger,
+            )
+            timed_observation = pickle.loads(received_bytes)  # nosec
+            deserialize_time = time.perf_counter() - start_deserialize
+
+            if not isinstance(timed_observation, TimedObservation):
+                raise TypeError(
+                    f"Expected TimedObservation, got {type(timed_observation)}"
+                )
+
+            raw_observation = timed_observation.get_observation()
+            if observation_has_jpeg_payloads(raw_observation):
+                decode_started = time.perf_counter()
+                timed_observation.observation = decompress_observation_images(raw_observation)
+                decode_ms = (time.perf_counter() - decode_started) * 1000.0
+                self.logger.debug(
+                    f"Decoded JPEG observation #{timed_observation.get_timestep()} "
+                    f"in {decode_ms:.1f}ms | wire={len(received_bytes) / (1024 * 1024):.2f}MB"
+                )
+
+            obs_timestep = timed_observation.get_timestep()
+            obs_timestamp = timed_observation.get_timestamp()
+            fps_metrics = self._server.fps_tracker.calculate_fps_metrics(obs_timestamp)
+
+            self.logger.debug(
+                f"Received observation #{obs_timestep} | "
+                f"Avg FPS: {fps_metrics['avg_fps']:.2f} | "
+                f"Target: {fps_metrics['target_fps']:.2f} | "
+                f"One-way latency: {(receive_time - obs_timestamp) * 1000:.2f}ms"
+            )
+            self.logger.debug(
+                f"Server timestamp: {receive_time:.6f} | "
+                f"Client timestamp: {obs_timestamp:.6f} | "
+                f"Deserialization time: {deserialize_time:.6f}s"
+            )
+
+            if not self._server._enqueue_observation(timed_observation):
+                self.logger.debug(f"Observation #{obs_timestep} has been filtered out")
+
+            return self._services_pb2.Empty()
+
+        self._server.SendObservations = send_observations
         _ = original
 
     @property

@@ -3,8 +3,6 @@
 # 作用：启动前打印远程推理前置条件，然后运行 Robot Client
 set -euo pipefail
 CONFIG_PATH="${1:-configs/record_pick_cube_pi05.json}"
-SKIP_BRINGUP="${SKIP_BRINGUP:-false}"
-SKIP_RESET="${SKIP_RESET:-false}"
 if [[ $# -gt 0 ]]; then
   shift
 fi
