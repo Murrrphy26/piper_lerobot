@@ -20,3 +20,6 @@ outputs/
 # conda环境
 env/
 venv/
+backups
+camera_temp
+data

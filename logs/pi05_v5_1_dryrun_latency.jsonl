@@ -1,0 +1,68 @@
+{"type": "network_rtt_ms", "value": 4.756559996167198}
+{"type": "network_rtt_ms", "value": 45.089035003911704}
+{"type": "network_rtt_ms", "value": 1.6658789973007515}
+{"type": "network_rtt_ms", "value": 1.6699709958629683}
+{"type": "network_rtt_ms", "value": 1.5330429887399077}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.4227640019962564}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.0932016372680664, "serialize_ms": 7.796424004482105, "grpc_ms": 53.82261199702043, "total_ms": 61.619036001502536, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.0008589995559304953}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09284782409667969, "serialize_ms": 9.324422993813641, "grpc_ms": 12.028843004372902, "total_ms": 21.353265998186544, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.0017730053514242172}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09306907653808594, "serialize_ms": 8.247627993114293, "grpc_ms": 11.617401003604755, "total_ms": 19.865028996719047, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.00031398667488247156}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09310245513916016, "serialize_ms": 5.682049988536164, "grpc_ms": 48.885656011407264, "total_ms": 54.56770599994343, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.0005369947757571936}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.0928030014038086, "serialize_ms": 6.608802999835461, "grpc_ms": 52.090156998019665, "total_ms": 58.69895999785513, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.0004540052032098174}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09295654296875, "serialize_ms": 6.261699003516696, "grpc_ms": 10.060952001367696, "total_ms": 16.322651004884392, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.006390997441485524}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09305095672607422, "serialize_ms": 6.4168120006797835, "grpc_ms": 9.99547800165601, "total_ms": 16.412290002335794, "success": true}
+{"type": "obs_capture_ms", "timestep": 0, "value": 0.0005180045263841748}
+{"type": "obs_to_action_ms", "obs_timestep": 0, "value": 106.57044599065557}
+{"type": "server_to_client_ms", "action_timestep": 0, "value": 692.2190189361572}
+{"type": "obs_send_ms", "timestep": 0, "payload_mb": 0.09275245666503906, "serialize_ms": 19.910923001589254, "grpc_ms": 50.25551198923495, "total_ms": 70.1664349908242, "success": true}
+{"type": "obs_to_action_ms", "obs_timestep": 0, "value": 251.41195599280763}
+{"type": "server_to_client_ms", "action_timestep": 0, "value": 424.80969429016113}
+{"type": "server_to_client_ms", "action_timestep": 0, "value": 610.5906963348389}
+{"type": "obs_capture_ms", "timestep": 27, "value": 0.000743995769880712}
+{"type": "obs_send_ms", "timestep": 27, "payload_mb": 0.0926361083984375, "serialize_ms": 6.851776997791603, "grpc_ms": 10.555237997323275, "total_ms": 17.407014995114878, "success": true}
+{"type": "obs_capture_ms", "timestep": 28, "value": 0.0006040063453838229}
+{"type": "obs_send_ms", "timestep": 28, "payload_mb": 0.09284114837646484, "serialize_ms": 9.33202198939398, "grpc_ms": 45.47928800457157, "total_ms": 54.81130999396555, "success": true}
+{"type": "obs_capture_ms", "timestep": 29, "value": 0.000667991116642952}
+{"type": "obs_send_ms", "timestep": 29, "payload_mb": 0.09310054779052734, "serialize_ms": 7.93130999954883, "grpc_ms": 34.253727993927896, "total_ms": 42.185037993476726, "success": true}
+{"type": "obs_to_action_ms", "obs_timestep": 27, "value": 268.89040700916667}
+{"type": "server_to_client_ms", "action_timestep": 27, "value": 288.6006832122803}
+{"type": "obs_to_action_ms", "obs_timestep": 29, "value": 312.96792801003903}
+{"type": "server_to_client_ms", "action_timestep": 29, "value": 358.20603370666504}
+{"type": "obs_capture_ms", "timestep": 56, "value": 0.0005479960236698389}
+{"type": "obs_send_ms", "timestep": 56, "payload_mb": 0.09263324737548828, "serialize_ms": 6.198679999215528, "grpc_ms": 51.18929500167724, "total_ms": 57.387975000892766, "success": true}
+{"type": "obs_capture_ms", "timestep": 57, "value": 0.0006429909262806177}
+{"type": "obs_send_ms", "timestep": 57, "payload_mb": 0.09296226501464844, "serialize_ms": 9.278729994548485, "grpc_ms": 51.973605004604906, "total_ms": 61.25233499915339, "success": true}
+{"type": "obs_capture_ms", "timestep": 58, "value": 0.00041601015254855156}
+{"type": "obs_send_ms", "timestep": 58, "payload_mb": 0.0927267074584961, "serialize_ms": 5.940599992754869, "grpc_ms": 9.918998010107316, "total_ms": 15.859598002862185, "success": true}
+{"type": "obs_capture_ms", "timestep": 59, "value": 0.0004029861884191632}
+{"type": "obs_to_action_ms", "obs_timestep": 56, "value": 274.8861520085484}
+{"type": "server_to_client_ms", "action_timestep": 56, "value": 333.3702087402344}
+{"type": "obs_send_ms", "timestep": 59, "payload_mb": 0.09261131286621094, "serialize_ms": 9.686286008218303, "grpc_ms": 72.78041700192261, "total_ms": 82.46670301014092, "success": true}
+{"type": "obs_to_action_ms", "obs_timestep": 59, "value": 225.53450599662028}
+{"type": "server_to_client_ms", "action_timestep": 59, "value": 310.03332138061523}
+{"type": "obs_capture_ms", "timestep": 86, "value": 0.0005989859346300364}
+{"type": "obs_send_ms", "timestep": 86, "payload_mb": 0.0927438735961914, "serialize_ms": 7.9619460011599585, "grpc_ms": 53.80741901171859, "total_ms": 61.76936501287855, "success": true}
+{"type": "obs_capture_ms", "timestep": 87, "value": 0.0006210029823705554}
+{"type": "obs_send_ms", "timestep": 87, "payload_mb": 0.0928640365600586, "serialize_ms": 7.08138600748498, "grpc_ms": 9.811382988118567, "total_ms": 16.892768995603547, "success": true}
+{"type": "obs_capture_ms", "timestep": 88, "value": 0.0007990020094439387}
+{"type": "obs_send_ms", "timestep": 88, "payload_mb": 0.09284782409667969, "serialize_ms": 7.520724990172312, "grpc_ms": 10.228058992652223, "total_ms": 17.748783982824534, "success": true}
+{"type": "obs_to_action_ms", "obs_timestep": 86, "value": 243.24746199999936}
+{"type": "server_to_client_ms", "action_timestep": 86, "value": 307.5895309448242}
+{"type": "obs_to_action_ms", "obs_timestep": 88, "value": 349.5984280016273}
+{"type": "server_to_client_ms", "action_timestep": 88, "value": 368.4253692626953}
+{"type": "obs_capture_ms", "timestep": 115, "value": 0.0007549970177933574}
+{"type": "obs_send_ms", "timestep": 115, "payload_mb": 0.09290504455566406, "serialize_ms": 8.111219998681918, "grpc_ms": 49.43916900083423, "total_ms": 57.550388999516144, "success": true}
+{"type": "obs_capture_ms", "timestep": 116, "value": 0.000676998752169311}
+{"type": "obs_send_ms", "timestep": 116, "payload_mb": 0.09276962280273438, "serialize_ms": 9.442989001399837, "grpc_ms": 8.514052009559236, "total_ms": 17.957041010959074, "success": true}
+{"type": "obs_capture_ms", "timestep": 117, "value": 0.0005799956852570176}
+{"type": "obs_send_ms", "timestep": 117, "payload_mb": 0.09280586242675781, "serialize_ms": 10.014640996814705, "grpc_ms": 32.089934989926405, "total_ms": 42.10457598674111, "success": true}
+{"type": "obs_to_action_ms", "obs_timestep": 115, "value": 226.59675699833315}
+{"type": "server_to_client_ms", "action_timestep": 115, "value": 284.85727310180664}
+{"type": "obs_to_action_ms", "obs_timestep": 117, "value": 313.6482529953355}
+{"type": "server_to_client_ms", "action_timestep": 117, "value": 357.8646183013916}
