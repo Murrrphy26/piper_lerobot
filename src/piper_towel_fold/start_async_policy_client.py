@@ -43,11 +43,6 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
     if policy_path is not None:
         args.policy_path = policy_path
 
-    camera_indices, camera_names = cameras_to_csv(config)
-    if camera_indices:
-        args.camera_indices = camera_indices
-        args.camera_names = camera_names
-
     policy_live = config.get("policy_live", {})
     if policy_live is None:
         policy_live = {}
@@ -74,6 +69,15 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
         async_cfg = {}
     if not isinstance(async_cfg, dict):
         raise ValueError("'async_inference' must be an object when present.")
+
+    camera_indices, camera_names = cameras_to_csv(async_cfg)
+    if not camera_indices:
+        camera_indices, camera_names = cameras_to_csv(policy_live)
+    if not camera_indices:
+        camera_indices, camera_names = cameras_to_csv(config)
+    if camera_indices:
+        args.camera_indices = camera_indices
+        args.camera_names = camera_names
 
     async_key_map = {
         "server_address": "server_address",

@@ -1,14 +1,14 @@
 {
   "task": "pick up the orange cube from the table and put it in the bowl",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_v727_yjw",
+  "repo_id": "local/cube_cam_adjustment",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
   "prompt_outcome": true,
   "episode_outcome": "skip",
   "output_dir": "data/raw",
-  "fps": 20.0,
+  "fps": 10.0,
   "duration": null,
   "follower_left_can": null,
   "follower_right_can": "can0",
@@ -20,20 +20,21 @@
   "image_format": "jpg",
   "image_quality": 95,
   "action_source": "leader",
-  "recording_notes": "",
+  "recording_notes": "本地 ACT：cube_pi05_v5 离线 SG 平滑后重训；腕相权重 2.5。",
   "training": {
     "policy_type": "act_piper",
-    "job_name": "act_piper_cube_v727_yjw_ojag",
-    "output_dir": "outputs/train/act_piper_cube_v727_yjw_ojag",
+    "job_name": "cube_cam_adjustment",
+    "output_dir": "outputs/train/cube_cam_adjustment",
+    "camera_names": ["cam_right", "cam_front", "cam_side"],
     "camera_scales": {
       "cam_right": 1.0,
       "cam_side": 1.0,
-      "cam_top": 1.0
+      "cam_front": 1.0
     },
     "learnable_camera_scales": false,
     "use_camera_id_embed": true,
-    "chunk_size": 200,
-    "n_action_steps": 100,
+    "chunk_size": 100,
+    "n_action_steps": 50,
     "device": "cuda",
     "steps": 10000,
     "batch_size": 4,
@@ -48,27 +49,41 @@
     "pytorch_alloc_conf": "expandable_segments:True"
   },
   "policy_live": {
-    "policy_path": "outputs/train/act_piper_cube_v727_yjw_ojag/checkpoints/last/pretrained_model",
-    "repo_id": "local/cube_v727_yjw_ojag",
-    "dataset_root": "data/lerobot/local/cube_v727_yjw_ojag",
+    "policy_path": "outputs/train/cube_cam_adjustment/checkpoints/last/pretrained_model",
+    "repo_id": "local/cube_cam_adjustment",
+    "dataset_root": "data/lerobot/local/cube_cam_adjustment",
     "video_backend": "pyav",
     "device": "cuda",
     "execute": true,
     "duration": 60.0,
     "fps": 20.0,
-    "control_hz": 30.0,
+    "control_hz": 20.0,
     "use_action_chunk_stream": true,
     "prefetch_remaining": 15,
     "chunk_blend_steps": 15,
-    "n_action_steps": 100,
-    "control_speed": 20,
+    "n_action_steps": 50,
+    "control_speed": 12,
     "max_joint_step_rad": 0.02,
+    "max_gripper_step_m": 0,
     "gripper_effort": 1000,
     "smoothing_alpha": 0.20,
+    "cameras": [
+      {
+        "name": "cam_right",
+        "ref": 16
+      },
+      {
+        "name": "cam_side",
+        "ref": 6
+      },
+      {
+        "name": "cam_front",
+        "ref": 14
+      }
+    ],
     "pace_by_reach": false,
     "advance_threshold_rad": 0.08,
     "max_hold_steps": 30,
-    "max_gripper_step_m": 0,
     "print_every": 5,
     "log_jsonl": "auto",
     "omit_error_logs": true
@@ -83,8 +98,8 @@
       "ref": 6
     },
     {
-      "name": "cam_top",
-      "ref": 18
+      "name": "cam_front",
+      "ref": 14
     }
   ],
   "preprocessing": {

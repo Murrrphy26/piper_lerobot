@@ -93,13 +93,23 @@ class PiperRobot(Robot):
         return None
 
     def _make_follower(self, can_name: str | None) -> object | None:
-        if can_name is None:
+        if can_name is None or str(can_name).strip() == "":
             return None
 
         if C_PiperInterface_V2 is None:
             raise ImportError("piper_sdk is not installed in the current Python environment.")
 
-        arm = C_PiperInterface_V2(can_name=can_name)
+        # Default SDK level is WARNING, which still prints [ERROR] on CAN send failures
+        # (e.g. disconnected left arm). Keep the console clean during live runs.
+        create_kwargs: dict[str, object] = {"can_name": can_name}
+        try:
+            from piper_sdk import LogLevel
+
+            create_kwargs["logger_level"] = LogLevel.SILENT
+        except Exception:
+            pass
+
+        arm = C_PiperInterface_V2(**create_kwargs)
         arm.ConnectPort()
         if self.config.enable_control:
             self._enable_arm_control(arm)
@@ -203,7 +213,19 @@ class PiperRobot(Robot):
         return self._leaders[side] or self._followers[side]
 
     def _limited_value(self, target: float, current: float, max_step: float) -> float:
+        # <=0 / inf / 超大步长 = 不限速，直接下发目标（推理夹爪、replay 1:1 等）
+        if (not math.isfinite(max_step)) or max_step <= 0.0 or max_step >= 1e6:
+            return float(target)
         return float(np.clip(target, current - max_step, current + max_step))
+
+    def set_control_speed(self, control_speed: int) -> None:
+        """更新 SDK MotionCtrl_2 速度档（0-100），立即作用于已连接从臂。"""
+        self.config.control_speed = int(control_speed)
+        if not self.is_connected:
+            return
+        for arm in self._followers.values():
+            if arm is not None:
+                self._enable_arm_control(arm)
 
     def _arm_command_from_action(
         self,

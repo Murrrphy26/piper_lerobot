@@ -11,7 +11,12 @@ Examples:
 
   # 连续平滑扫动约 10s（默认左右 j5 正弦），用于观察抖动
   PYTHONPATH=src python tools/move_to_joints.py --preset sweep
-  PYTHONPATH=src python tools/move_to_joints.py --preset sweep --duration 10 --amp-deg 5 --freq-hz 0.3
+  PYTHONPATH=src python tools/move_to_joints.py --preset sweep --duration 10 --amp-deg 5 --freq-hz 0.2
+
+  # 多关节同时扫动（测耦合/整臂是否抖）
+  PYTHONPATH=src python tools/move_to_joints.py --preset sweep --sweep-joints 2,3,5
+  PYTHONPATH=src python tools/move_to_joints.py --preset sweep --sweep-joints 1,2,3,4,5,6 \\
+    --amp-deg 8 --phase-mode stagger --duration 10
 
   # 自定义目标（度）
   PYTHONPATH=src python tools/move_to_joints.py \\
@@ -36,10 +41,10 @@ HOME_RIGHT_GRIPPER_M = 0.000140
 
 DEMO_J5_OFFSET_DEG = 5.0
 # sweep 默认：在 j5 上做正弦往返，其它关节保持当前角
-SWEEP_JOINT_INDEX = 5  # 1-based
+SWEEP_DEFAULT_JOINTS = (5,)  # 1-based
 SWEEP_DEFAULT_DURATION_S = 10.0
 SWEEP_DEFAULT_AMP_DEG = 5.0
-SWEEP_DEFAULT_FREQ_HZ = 0.3
+SWEEP_DEFAULT_FREQ_HZ = 0.2
 
 
 def parse_joints_deg(text: str) -> list[float]:
@@ -48,6 +53,46 @@ def parse_joints_deg(text: str) -> list[float]:
         raise argparse.ArgumentTypeError("需要恰好 6 个关节角（度），用逗号分隔")
     return [float(p) for p in parts]
 
+
+def parse_joint_indices(text: str) -> list[int]:
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError("至少指定 1 个关节，如 5 或 2,3,5")
+    indices: list[int] = []
+    for part in parts:
+        value = int(part)
+        if value < 1 or value > 6:
+            raise argparse.ArgumentTypeError(f"关节序号必须在 1..6，收到 {value}")
+        if value not in indices:
+            indices.append(value)
+    return indices
+
+
+def parse_amp_list(text: str, n_joints: int) -> list[float]:
+    """单个幅值，或与关节数等长的逗号分隔幅值列表。"""
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if len(parts) == 1:
+        amp = float(parts[0])
+        if amp < 0:
+            raise argparse.ArgumentTypeError("幅值必须 >= 0")
+        return [amp] * n_joints
+    if len(parts) != n_joints:
+        raise argparse.ArgumentTypeError(
+            f"amp-deg 需 1 个数或与关节数相同（{n_joints}），收到 {len(parts)} 个"
+        )
+    amps = [float(p) for p in parts]
+    if any(a < 0 for a in amps):
+        raise argparse.ArgumentTypeError("幅值必须 >= 0")
+    return amps
+
+
+def phase_offsets_rad(n_joints: int, phase_mode: str) -> list[float]:
+    if phase_mode == "sync":
+        return [0.0] * n_joints
+    if phase_mode == "stagger":
+        # 各关节错相，末端轨迹更复杂，更能暴露耦合抖动
+        return [2.0 * math.pi * i / max(n_joints, 1) for i in range(n_joints)]
+    raise ValueError(f"未知 phase-mode: {phase_mode}")
 
 def joints_to_action(side: str, joints_deg: list[float], gripper_m: float) -> dict[str, float]:
     action = {
@@ -180,35 +225,51 @@ def sweep_joints(
     right_gripper_m: float,
     *,
     duration_s: float,
-    amp_deg: float,
+    amps_deg: list[float],
     freq_hz: float,
-    joint_index: int,
+    joint_indices: list[int],
+    phase_mode: str,
     period_s: float,
 ) -> None:
-    """以当前位姿为中心，对指定关节做正弦连续运动，便于目视/统计抖动。"""
-    if joint_index < 1 or joint_index > 6:
-        raise ValueError("joint_index 必须在 1..6")
+    """以当前位姿为中心，对一个或多个关节做正弦连续运动，便于目视/统计抖动。"""
+    if not joint_indices:
+        raise ValueError("至少指定 1 个关节")
+    if len(amps_deg) != len(joint_indices):
+        raise ValueError("amps_deg 长度必须与 joint_indices 一致")
     if duration_s <= 0:
         raise ValueError("duration 必须 > 0")
-    if amp_deg < 0:
-        raise ValueError("amp-deg 必须 >= 0")
     if freq_hz < 0:
         raise ValueError("freq-hz 必须 >= 0")
 
-    ji = joint_index - 1
+    phases = phase_offsets_rad(len(joint_indices), phase_mode)
+    joint_label = ",".join(f"j{j}" for j in joint_indices)
+    amp_label = ",".join(f"±{a:.1f}°" for a in amps_deg)
     print(
-        f"sweep：关节 j{joint_index}，幅值 ±{amp_deg:.2f}°，频率 {freq_hz:.3f} Hz，"
-        f"时长 {duration_s:.1f}s，周期 {period_s:.3f}s"
+        f"sweep：关节 [{joint_label}]，幅值 [{amp_label}]，频率 {freq_hz:.3f} Hz，"
+        f"相位={phase_mode}，时长 {duration_s:.1f}s，周期 {period_s:.3f}s"
     )
-    print("其它关节保持起始角。Ctrl+C 可中断。")
+    print("未列入的关节保持起始角。Ctrl+C 可中断。")
 
     t0 = time.monotonic()
     next_tick = t0
     step = 0
-    max_track_err = {"left": 0.0, "right": 0.0}
-    max_jerk_proxy = {"left": 0.0, "right": 0.0}
-    prev_fb = {"left": None, "right": None}
-    prev_dfb = {"left": None, "right": None}
+    # 按侧、按关节统计
+    max_track_err: dict[str, dict[int, float]] = {
+        "left": {j: 0.0 for j in joint_indices},
+        "right": {j: 0.0 for j in joint_indices},
+    }
+    max_jerk_proxy: dict[str, dict[int, float]] = {
+        "left": {j: 0.0 for j in joint_indices},
+        "right": {j: 0.0 for j in joint_indices},
+    }
+    prev_fb: dict[str, dict[int, float | None]] = {
+        "left": {j: None for j in joint_indices},
+        "right": {j: None for j in joint_indices},
+    }
+    prev_dfb: dict[str, dict[int, float | None]] = {
+        "left": {j: None for j in joint_indices},
+        "right": {j: None for j in joint_indices},
+    }
 
     while True:
         now = time.monotonic()
@@ -216,12 +277,15 @@ def sweep_joints(
         if t >= duration_s:
             break
 
-        # 正弦从 0 出发，结束时尽量回到中心（duration 不必整周期）
-        offset = amp_deg * math.sin(2.0 * math.pi * freq_hz * t)
         left_deg = list(base_left_deg)
         right_deg = list(base_right_deg)
-        left_deg[ji] = base_left_deg[ji] + offset
-        right_deg[ji] = base_right_deg[ji] + offset
+        offsets: list[float] = []
+        for amp, phase, joint_index in zip(amps_deg, phases, joint_indices, strict=True):
+            offset = amp * math.sin(2.0 * math.pi * freq_hz * t + phase)
+            offsets.append(offset)
+            ji = joint_index - 1
+            left_deg[ji] = base_left_deg[ji] + offset
+            right_deg[ji] = base_right_deg[ji] + offset
 
         action = {}
         action.update(joints_to_action("left", left_deg, left_gripper_m))
@@ -230,28 +294,31 @@ def sweep_joints(
         obs = robot.get_observation()
 
         for side, cmd_deg in (("left", left_deg), ("right", right_deg)):
-            fb = math.degrees(obs[f"{side}_joint_{joint_index}.pos"])
-            track_err = abs(fb - cmd_deg[ji])
-            max_track_err[side] = max(max_track_err[side], track_err)
+            for joint_index in joint_indices:
+                ji = joint_index - 1
+                fb = math.degrees(obs[f"{side}_joint_{joint_index}.pos"])
+                track_err = abs(fb - cmd_deg[ji])
+                max_track_err[side][joint_index] = max(
+                    max_track_err[side][joint_index], track_err
+                )
 
-            prev = prev_fb[side]
-            if prev is not None:
-                dfb = fb - prev
-                prev_d = prev_dfb[side]
-                if prev_d is not None:
-                    # 相邻采样一阶差分的变化，粗略反映不平滑/抖动
-                    max_jerk_proxy[side] = max(max_jerk_proxy[side], abs(dfb - prev_d))
-                prev_dfb[side] = dfb
-            prev_fb[side] = fb
+                prev = prev_fb[side][joint_index]
+                if prev is not None:
+                    dfb = fb - prev
+                    prev_d = prev_dfb[side][joint_index]
+                    if prev_d is not None:
+                        max_jerk_proxy[side][joint_index] = max(
+                            max_jerk_proxy[side][joint_index], abs(dfb - prev_d)
+                        )
+                    prev_dfb[side][joint_index] = dfb
+                prev_fb[side][joint_index] = fb
 
         step += 1
         if step == 1 or step % 25 == 0:
-            print(
-                f"t={t:5.2f}s  offset={offset:+6.2f}°  "
-                f"cmd L/R j{joint_index}={left_deg[ji]:7.2f}/{right_deg[ji]:7.2f}  "
-                f"fb={math.degrees(obs[f'left_joint_{joint_index}.pos']):7.2f}/"
-                f"{math.degrees(obs[f'right_joint_{joint_index}.pos']):7.2f}"
+            off_str = ", ".join(
+                f"j{j}={o:+5.1f}" for j, o in zip(joint_indices, offsets, strict=True)
             )
+            print(f"t={t:5.2f}s  offsets[{off_str}]")
 
         next_tick += period_s
         sleep_s = next_tick - time.monotonic()
@@ -260,7 +327,6 @@ def sweep_joints(
         else:
             next_tick = time.monotonic()
 
-    # 收尾：回到中心位姿
     print("sweep 结束，回到起始中心角…")
     move_to(
         robot,
@@ -272,12 +338,23 @@ def sweep_joints(
         period_s=period_s,
         timeout_s=max(10.0, duration_s),
     )
-    print(
-        "抖动粗测（越大越不平）：\n"
-        f"  max |cmd-fb|  left={max_track_err['left']:.3f}°  right={max_track_err['right']:.3f}°\n"
-        f"  max |ΔΔfb|   left={max_jerk_proxy['left']:.3f}°  right={max_jerk_proxy['right']:.3f}°"
-    )
-    print("目视：若运动过程有明显顿挫/颤动，即存在较大抖动。")
+
+    def fmt_joint_stats(stats: dict[str, dict[int, float]]) -> str:
+        lines = []
+        for side in ("left", "right"):
+            parts = [f"j{j}={stats[side][j]:.3f}" for j in joint_indices]
+            lines.append(f"  {side}: " + ", ".join(parts))
+        return "\n".join(lines)
+
+    print("抖动粗测（越大越不平）：")
+    print("max |cmd-fb| (°)：")
+    print(fmt_joint_stats(max_track_err))
+    print("max |ΔΔfb| (°)：")
+    print(fmt_joint_stats(max_jerk_proxy))
+    worst_track = max(max_track_err[s][j] for s in ("left", "right") for j in joint_indices)
+    worst_jerk = max(max_jerk_proxy[s][j] for s in ("left", "right") for j in joint_indices)
+    print(f"最差：max|cmd-fb|={worst_track:.3f}°  max|ΔΔfb|={worst_jerk:.3f}°")
+    print("目视：若运动过程有明显顿挫/颤动（尤其末端），即存在较大抖动。")
 
 
 def parse_args() -> argparse.Namespace:
@@ -323,21 +400,33 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--amp-deg",
-        type=float,
-        default=SWEEP_DEFAULT_AMP_DEG,
-        help="sweep 正弦幅值（度），默认 ±5",
+        type=str,
+        default=str(SWEEP_DEFAULT_AMP_DEG),
+        help="sweep 正弦幅值（度）：单个值，或与 --sweep-joints 等长的列表，如 5 或 5,8,5",
     )
     parser.add_argument(
         "--freq-hz",
         type=float,
         default=SWEEP_DEFAULT_FREQ_HZ,
-        help="sweep 正弦频率（Hz），默认 0.3",
+        help="sweep 正弦频率（Hz），默认 0.2",
+    )
+    parser.add_argument(
+        "--sweep-joints",
+        type=parse_joint_indices,
+        default=list(SWEEP_DEFAULT_JOINTS),
+        help="参与扫动的关节，如 5 或 2,3,5 或 1,2,3,4,5,6",
     )
     parser.add_argument(
         "--sweep-joint",
         type=int,
-        default=SWEEP_JOINT_INDEX,
-        help="sweep 的关节序号 1..6，默认 5",
+        default=None,
+        help="兼容旧参数：单个关节序号；若设置则覆盖 --sweep-joints",
+    )
+    parser.add_argument(
+        "--phase-mode",
+        choices=("sync", "stagger"),
+        default="stagger",
+        help="多关节相位：sync=同相；stagger=错相（默认，更能测耦合）",
     )
     parser.add_argument(
         "--dry-run",
@@ -345,7 +434,6 @@ def parse_args() -> argparse.Namespace:
         help="只打印目标，不连接/不下发",
     )
     return parser.parse_args()
-
 
 def resolve_static_targets(
     args: argparse.Namespace,
@@ -448,6 +536,12 @@ def main() -> None:
                 left_g = args.left_gripper
             if args.right_gripper is not None:
                 right_g = args.right_gripper
+
+            joint_indices = args.sweep_joints
+            if args.sweep_joint is not None:
+                joint_indices = [args.sweep_joint]
+            amps_deg = parse_amp_list(args.amp_deg, len(joint_indices))
+
             sweep_joints(
                 robot,
                 base_left,
@@ -455,9 +549,10 @@ def main() -> None:
                 left_g,
                 right_g,
                 duration_s=args.duration,
-                amp_deg=args.amp_deg,
+                amps_deg=amps_deg,
                 freq_hz=args.freq_hz,
-                joint_index=args.sweep_joint,
+                joint_indices=joint_indices,
+                phase_mode=args.phase_mode,
                 period_s=args.period,
             )
             return

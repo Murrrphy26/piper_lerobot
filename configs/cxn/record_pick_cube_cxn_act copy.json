@@ -1,7 +1,7 @@
 {
   "task": "pick up the orange cube from the table and put it in the bowl",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_v727_yjw",
+  "repo_id": "local/cube_v727_cxn",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
@@ -20,11 +20,14 @@
   "image_format": "jpg",
   "image_quality": 95,
   "action_source": "leader",
-  "recording_notes": "",
+  "recording_notes": "训练/推理专用。录制仍为 leader action；训练通过 training.action_compose=obs_joints_action_gripper 自动生成 *_ojag 数据集（关节监督用 observation.state，夹爪监督用 action），与 replay --source obs_joints_action_gripper 对齐。ACT 时域：chunk_size=200 / n_action_steps=100 @ 20fps ≈ 10s 视野。",
   "training": {
     "policy_type": "act_piper",
-    "job_name": "act_piper_cube_v727_yjw_ojag",
-    "output_dir": "outputs/train/act_piper_cube_v727_yjw_ojag",
+    "job_name": "act_piper_cube_v727_cxn_ojag",
+    "output_dir": "outputs/train/act_piper_cube_v727_cxn_ojag",
+    "action_compose": "obs_joints_action_gripper",
+    "action_compose_repo_id": "local/cube_v727_cxn_ojag",
+    "action_compose_overwrite": false,
     "camera_scales": {
       "cam_right": 1.0,
       "cam_side": 1.0,
@@ -48,27 +51,27 @@
     "pytorch_alloc_conf": "expandable_segments:True"
   },
   "policy_live": {
-    "policy_path": "outputs/train/act_piper_cube_v727_yjw_ojag/checkpoints/last/pretrained_model",
-    "repo_id": "local/cube_v727_yjw_ojag",
-    "dataset_root": "data/lerobot/local/cube_v727_yjw_ojag",
+    "policy_path": "outputs/train/act_piper_cube_v727_cxn_ojag/checkpoints/last/pretrained_model",
+    "repo_id": "local/cube_v727_cxn_ojag",
+    "dataset_root": "data/lerobot/local/cube_v727_cxn_ojag",
     "video_backend": "pyav",
     "device": "cuda",
     "execute": true,
     "duration": 60.0,
     "fps": 20.0,
-    "control_hz": 30.0,
+    "control_hz": 20.0,
     "use_action_chunk_stream": true,
     "prefetch_remaining": 15,
     "chunk_blend_steps": 15,
     "n_action_steps": 100,
-    "control_speed": 20,
+    "control_speed": 12,
     "max_joint_step_rad": 0.02,
+    "max_gripper_step_m": 0.002,
     "gripper_effort": 1000,
     "smoothing_alpha": 0.20,
     "pace_by_reach": false,
     "advance_threshold_rad": 0.08,
     "max_hold_steps": 30,
-    "max_gripper_step_m": 0,
     "print_every": 5,
     "log_jsonl": "auto",
     "omit_error_logs": true
@@ -76,7 +79,7 @@
   "cameras": [
     {
       "name": "cam_right",
-      "ref": 16
+      "ref": 8
     },
     {
       "name": "cam_side",
@@ -84,7 +87,7 @@
     },
     {
       "name": "cam_top",
-      "ref": 18
+      "ref": 10
     }
   ],
   "preprocessing": {

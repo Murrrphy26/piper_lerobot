@@ -22,7 +22,8 @@ echo
 #   PRESET=home bash scripts/run_move_to_joints.sh
 #   bash scripts/run_move_to_joints.sh --preset home
 #   bash scripts/run_move_to_joints.sh --preset sweep
-#   bash scripts/run_move_to_joints.sh --preset sweep --duration 10 --amp-deg 5 --freq-hz 0.3
+#   bash scripts/run_move_to_joints.sh --preset sweep --sweep-joints 2,3,5
+#   bash scripts/run_move_to_joints.sh --preset sweep --sweep-joints 1,2,3,4,5,6 --amp-deg 8 --phase-mode stagger
 if [[ $# -eq 0 ]]; then
   set -- --preset "${PRESET}"
 fi

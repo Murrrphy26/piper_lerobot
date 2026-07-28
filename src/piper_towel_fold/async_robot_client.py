@@ -697,7 +697,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-fps", type=int, default=30)
     parser.add_argument("--control-speed", type=int, default=10)
     parser.add_argument("--max-joint-step-rad", type=float, default=0.025)
-    parser.add_argument("--max-gripper-step-m", type=float, default=0.003)
+    parser.add_argument("--max-gripper-step-m", type=float, default=0.003,
+                        help="每控制周期夹爪最大步进（米）；<=0 表示不限速")
     parser.add_argument("--gripper-effort", type=int, default=1000)
     parser.add_argument("--smoothing-alpha", type=float, default=0.25)
     parser.add_argument("--print-every", type=int, default=1)

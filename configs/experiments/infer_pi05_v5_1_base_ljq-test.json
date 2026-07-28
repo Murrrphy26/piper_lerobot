@@ -65,7 +65,7 @@
     "max_joint_step_rad": 0.025,
     "max_gripper_step_m": 0.002,
     "gripper_effort": 1000,
-    "smoothing_alpha": 0.1,
+    "smoothing_alpha": 0.10,
     "pace_by_reach": false,
     "advance_threshold_rad": 0.08,
     "max_hold_steps": 30,
@@ -75,7 +75,7 @@
   "cameras": [
     {
       "name": "cam_right",
-      "ref": 16
+      "ref": 8
     },
     {
       "name": "cam_side",
@@ -83,7 +83,7 @@
     },
     {
       "name": "cam_top",
-      "ref": 14
+      "ref": 10
     }
   ],
   "preprocessing": {
@@ -124,9 +124,9 @@
     "server_address": "127.0.0.1:8080",
     "policy_type": "pi05",
     "policy_device": "cuda",
-    "actions_per_chunk": 50,
-    "chunk_size_threshold": 0.20,
-    "aggregate_fn_name": "latest_only",
+    "actions_per_chunk":20,
+    "chunk_size_threshold": 0,
+    "aggregate_fn_name": "weighted_average",
     "execute": true,
     "duration": 120.0,
     "network_benchmark_samples": 5,
@@ -134,9 +134,9 @@
     "latency_log_jsonl": "",
     "fps": 10.0,
     "control_speed": 15,
-    "max_joint_step_rad": 0.040,
+    "max_joint_step_rad": 0.025,
     "max_gripper_step_m": 0.002,
-    "smoothing_alpha": 0.1,
+    "smoothing_alpha": 0.10,
     "obs_image_compression": "jpeg",
     "obs_jpeg_quality": 85,
     "debug_visualize_queue_size": false

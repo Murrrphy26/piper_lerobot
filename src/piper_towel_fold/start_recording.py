@@ -10,12 +10,12 @@ def load_config(config_path: Path) -> dict:
     return data
 
 
-def cameras_to_csv(config: dict) -> tuple[str, str]:
-    cameras = config.get("cameras", [])
+def cameras_to_csv(config: dict, key: str = "cameras") -> tuple[str, str]:
+    cameras = config.get(key, [])
     if not cameras:
         return "", ""
     if not isinstance(cameras, list):
-        raise ValueError("'cameras' must be a list.")
+        raise ValueError(f"'{key}' must be a list.")
 
     camera_names: list[str] = []
     camera_refs: list[str] = []
@@ -41,7 +41,9 @@ def build_namespace(config: dict) -> argparse.Namespace:
     parser = build_arg_parser()
     args = parser.parse_args([])
 
-    camera_indices, camera_names = cameras_to_csv(config)
+    camera_indices, camera_names = cameras_to_csv(config, "recording_cameras")
+    if not camera_indices:
+        camera_indices, camera_names = cameras_to_csv(config)
     if camera_indices:
         config["camera_indices"] = camera_indices
         config["camera_names"] = camera_names

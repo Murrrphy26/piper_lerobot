@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .train_loss import report_from_log
+from .action_compose import (
+    ACTION_COMPOSE_MODES,
+    build_composed_dataset,
+    default_derived_repo_id,
+)
 
 
 DEFAULTS: dict[str, Any] = {
@@ -27,6 +32,16 @@ DEFAULTS: dict[str, Any] = {
     "push_to_hub": False,
     # 训完后自动根据 train.log 打印 loss 收敛判断（ACT / PI05 通用）
     "report_loss_on_finish": True,
+    # 默认：训练前自动生成 *_ojag（关节监督←observation.state，夹爪←action）
+    # 关闭：在 JSON 里设 "action_compose": null / "off"
+    "action_compose": "obs_joints_action_gripper",
+    "action_compose_overwrite": False,
+    # Optional derived-dataset filters. Example:
+    #   "camera_names": ["cam_right", "cam_top"],
+    #   "arm_sides": ["right"]
+    # They are applied after action_compose and before stats recomputation.
+    "camera_names": None,
+    "arm_sides": None,
 }
 
 
@@ -38,6 +53,16 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return data
 
 
+def normalize_action_compose(value: Any) -> str | None:
+    """Normalize training.action_compose; None/false/off disables the rewrite."""
+    if value is None or value is False:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "off", "false", "0"}:
+        return None
+    return text
+
+
 def training_config(config: dict[str, Any]) -> dict[str, Any]:
     training = config.get("training", {})
     if training is None:
@@ -47,6 +72,7 @@ def training_config(config: dict[str, Any]) -> dict[str, Any]:
 
     result = dict(DEFAULTS)
     result.update(training)
+    result["action_compose"] = normalize_action_compose(result.get("action_compose"))
     return result
 
 
@@ -56,6 +82,108 @@ def dataset_root(config: dict[str, Any]) -> Path:
     if not repo_id:
         raise ValueError("Config must contain 'repo_id'.")
     return Path(str(root)) / str(repo_id)
+
+
+def dataset_action_compose_mode(path: Path) -> str | None:
+    info_path = path / "meta" / "info.json"
+    if not info_path.is_file():
+        return None
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    meta = info.get("piper_action_compose")
+    if not isinstance(meta, dict):
+        return None
+    mode = meta.get("mode")
+    return str(mode) if mode else None
+
+
+def resolve_training_dataset(
+    config: dict[str, Any],
+    training: dict[str, Any],
+) -> tuple[str, Path]:
+    """Return (repo_id, dataset_path) used for lerobot-train.
+
+    Default pipeline (action_compose=obs_joints_action_gripper):
+      raw dataset → auto-build/reuse ``*_ojag`` → train on composed actions.
+    Skip rewrite if compose is disabled or the source is already composed.
+    """
+    source_repo_id = str(config["repo_id"])
+    source_path = dataset_root(config)
+    mode = normalize_action_compose(training.get("action_compose"))
+    if not mode:
+        print("Action compose: disabled (training on raw action column)")
+        return source_repo_id, source_path
+
+    if mode not in ACTION_COMPOSE_MODES:
+        raise ValueError(
+            f"Unsupported training.action_compose={mode!r}; "
+            f"expected one of {ACTION_COMPOSE_MODES} or null/off"
+        )
+
+    existing_mode = dataset_action_compose_mode(source_path)
+    if existing_mode == mode:
+        print("Action compose for training")
+        print(f"  mode: {mode}")
+        print(f"  source already composed: {source_path}")
+        print("  training on this dataset directly (skip rewrite)")
+        print()
+        return source_repo_id, source_path
+
+    camera_names = training.get("camera_names")
+    arm_sides = training.get("arm_sides")
+    target_repo_id = str(
+        training.get("action_compose_repo_id")
+        or training.get("derived_repo_id")
+        or default_derived_repo_id(
+            source_repo_id,
+            mode,
+            camera_names=camera_names,
+            arm_sides=arm_sides,
+        )
+    )
+    root = Path(str(config.get("root", "data/lerobot")))
+    target_path = (root / target_repo_id).resolve()
+    source_resolved = source_path.resolve()
+    if target_path == source_resolved:
+        # 禁止把改写目标指回原始数据集，否则会“reuse”未改写数据或原地覆盖录制结果
+        target_repo_id = default_derived_repo_id(
+            source_repo_id,
+            mode,
+            camera_names=camera_names,
+            arm_sides=arm_sides,
+        )
+        target_path = (root / target_repo_id).resolve()
+        print(
+            "警告：action_compose_repo_id 与原始 repo_id 相同，"
+            f"已改用安全目标 {target_repo_id}"
+        )
+
+    overwrite = bool(training.get("action_compose_overwrite", False))
+
+    print("Action compose for training (default pipeline)")
+    print(f"  mode: {mode}")
+    print(f"  source: {source_path}")
+    print(f"  target: {target_path}")
+    print("  meaning: action joints ← observation.state, grippers ← action")
+    if camera_names:
+        print(f"  camera_names: {camera_names}")
+    if arm_sides:
+        print(f"  arm_sides: {arm_sides}")
+    print()
+
+    build_composed_dataset(
+        source_path,
+        target_path,
+        source_repo_id=source_repo_id,
+        mode=mode,
+        overwrite=overwrite,
+        hardlink_videos=True,
+        camera_names=camera_names,
+        arm_sides=arm_sides,
+    )
+    return target_repo_id, target_path
 
 
 def patch_image_feature_names(info_path: Path) -> None:
@@ -127,16 +255,22 @@ def append_training_episodes(
     return episodes
 
 
-def command_from_config(config: dict[str, Any], training: dict[str, Any], path: Path) -> list[str]:
-    repo_id = str(config["repo_id"])
+def command_from_config(
+    config: dict[str, Any],
+    training: dict[str, Any],
+    path: Path,
+    *,
+    repo_id: str | None = None,
+) -> list[str]:
+    resolved_repo_id = str(repo_id or config["repo_id"])
     policy_type = str(training["policy_type"])
-    job_name = str(training.get("job_name") or f"{policy_type}_{repo_id.split('/')[-1]}")
+    job_name = str(training.get("job_name") or f"{policy_type}_{resolved_repo_id.split('/')[-1]}")
     output_dir = str(training.get("output_dir") or Path("outputs") / "train" / job_name)
     policy_repo_id = str(training.get("policy_repo_id") or f"local/{job_name}")
 
     cmd = [
         "lerobot-train",
-        f"--dataset.repo_id={repo_id}",
+        f"--dataset.repo_id={resolved_repo_id}",
         f"--dataset.root={path}",
         f"--policy.type={policy_type}",
         f"--output_dir={output_dir}",
@@ -257,7 +391,13 @@ def run_training_with_log(command: list[str], env: dict[str, str], log_path: Pat
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Start LeRobot training from a JSON recording config.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Start LeRobot training from a JSON recording config. "
+            "By default, rewrites actions to joints←observation.state / grippers←action "
+            "into a sibling *_ojag dataset before training."
+        ),
+    )
     parser.add_argument(
         "--config",
         default="configs/record_pick_cube.json",
@@ -269,22 +409,46 @@ def main() -> None:
         action="store_true",
         help="Skip post-training loss convergence report.",
     )
+    parser.add_argument(
+        "--no-action-compose",
+        action="store_true",
+        help="Disable default obs_joints_action_gripper rewrite; train on raw action.",
+    )
+    parser.add_argument(
+        "--action-compose-overwrite",
+        action="store_true",
+        help="Rebuild *_ojag even if it already exists.",
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
     training = training_config(config)
-    path = dataset_root(config)
+    if args.no_action_compose:
+        training["action_compose"] = None
+    if args.action_compose_overwrite:
+        training["action_compose_overwrite"] = True
+
+    repo_id, path = resolve_training_dataset(config, training)
     validate_dataset(path)
 
-    command = command_from_config(config, training, path)
-    output_dir = resolve_output_dir(config, training)
+    command = command_from_config(config, training, path, repo_id=repo_id)
+    output_dir = resolve_output_dir({**config, "repo_id": repo_id}, training)
     # Keep the train log beside output_dir so we do not create output_dir before
     # lerobot-train (it refuses to start if the directory already exists).
     log_path = output_dir.parent / f"{output_dir.name}.train.log"
 
     print("Training policy")
-    print(f"  dataset: {config['repo_id']}")
+    print(f"  dataset: {repo_id}")
     print(f"  dataset root: {path}")
+    if training.get("action_compose"):
+        print(f"  action_compose: {training['action_compose']} (default pipeline)")
+        if repo_id != config.get("repo_id"):
+            print(
+                f"  note: raw repo_id stays {config.get('repo_id')}; "
+                f"live/stats should use composed dataset {repo_id}"
+            )
+    else:
+        print("  action_compose: off")
     print(f"  policy: {training['policy_type']}")
     print(f"  steps: {training['steps']}")
     print(f"  batch size: {training['batch_size']}")

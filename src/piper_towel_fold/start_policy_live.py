@@ -59,9 +59,21 @@ def build_namespace(config: dict[str, Any]) -> argparse.Namespace:
 
     args = build_arg_parser().parse_args([])
 
+    can_keys = {
+        "follower_left_can",
+        "follower_right_can",
+        "leader_left_can",
+        "leader_right_can",
+    }
     for key in TOP_LEVEL_KEYS:
-        if key in config and config[key] is not None:
-            setattr(args, key, config[key])
+        if key not in config:
+            continue
+        value = config[key]
+        # JSON null must disable a CAN port; otherwise argparse defaults (e.g. can2) stick.
+        if key in can_keys:
+            setattr(args, key, None if value in (None, "") else value)
+        elif value is not None:
+            setattr(args, key, value)
 
     dataset_root = default_dataset_root(config)
     if dataset_root is not None:
@@ -71,19 +83,21 @@ def build_namespace(config: dict[str, Any]) -> argparse.Namespace:
     if policy_path is not None:
         args.policy_path = policy_path
 
-    camera_indices, camera_names = cameras_to_csv(config)
-    if camera_indices:
-        args.camera_indices = camera_indices
-        args.camera_names = camera_names
-
     policy_live = config.get("policy_live", {})
     if policy_live is None:
         policy_live = {}
     if not isinstance(policy_live, dict):
         raise ValueError("'policy_live' must be an object when present.")
 
+    camera_indices, camera_names = cameras_to_csv(policy_live)
+    if not camera_indices:
+        camera_indices, camera_names = cameras_to_csv(config)
+    if camera_indices:
+        args.camera_indices = camera_indices
+        args.camera_names = camera_names
+
     for key, value in policy_live.items():
-        if key == "root":
+        if key in {"root", "cameras"}:
             continue
         if not hasattr(args, key):
             raise ValueError(f"Unsupported policy_live config key: {key}")
