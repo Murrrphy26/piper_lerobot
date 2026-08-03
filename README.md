@@ -1,13 +1,5 @@
 # Piper六轴机械臂PI05操作手册
 
-## 前置安全注意事项
-
-若机械臂从臂锁死无法活动，复原操作步骤（务必注意安全）：
-
-1. 用手托稳机械臂本体，再拔下从臂航空插头；
-
-2. 重新插接主臂航空头，等待机械臂复位。
-
 # 快速开始
 
 ## 1. 打开工控机CAN总线初始化
@@ -122,7 +114,7 @@ conda activate piper
 
 ```bash
 bash scripts/bringup_can.sh
-# bash scripts/reset_arms.sh   # 如需退出示教模式取消注释执行
+# bash scripts/reset_arms.sh   # 退出示教模式 不是复原
 ```
 
 启动远程异步推理客户端：

@@ -95,6 +95,7 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
         "max_gripper_step_m": "max_gripper_step_m",
         "gripper_effort": "gripper_effort",
         "smoothing_alpha": "smoothing_alpha",
+        "hold_last_action_on_idle": "hold_last_action_on_idle",
         "print_every": "print_every",
         "log_jsonl": "log_jsonl",
         "debug_visualize_queue_size": "debug_visualize_queue_size",

@@ -641,12 +641,22 @@ class PiperAsyncRobotClient:
 
                     step += 1
                 else:
+                    # Optional hold (ACT-like): avoid starving the arm when remote
+                    # inference is late. Disable via --hold-last-action-on-idle=false
+                    # / async_inference.hold_last_action_on_idle for baseline A/B.
                     idle_steps += 1
+                    hold_enabled = bool(getattr(self.args, "hold_last_action_on_idle", True))
+                    holding = False
+                    if hold_enabled and previous_action is not None and self.args.execute:
+                        sent_action = self.robot.send_action(previous_action)
+                        previous_action = dict(sent_action)
+                        holding = True
                     if idle_steps == 1 or idle_steps % max(1, int(self.args.fps * 2)) == 0:
                         with self.action_queue_lock:
                             queue_size = self.action_queue.qsize()
                         self.logger.info(
-                            f"Waiting for remote actions... idle_steps={idle_steps} queue_size={queue_size}"
+                            f"Waiting for remote actions... idle_steps={idle_steps} "
+                            f"queue_size={queue_size} holding_last_action={holding}"
                         )
 
                 if self._ready_to_send_observation():
@@ -701,6 +711,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="每控制周期夹爪最大步进（米）；<=0 表示不限速")
     parser.add_argument("--gripper-effort", type=int, default=1000)
     parser.add_argument("--smoothing-alpha", type=float, default=0.25)
+    parser.add_argument(
+        "--hold-last-action-on-idle",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When the remote action queue is empty, keep sending the last action "
+        "(ACT-like). Use --no-hold-last-action-on-idle for baseline behavior.",
+    )
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--log-jsonl", default="")
     parser.add_argument(

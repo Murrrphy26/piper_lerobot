@@ -272,28 +272,90 @@ def command_from_config(
         "lerobot-train",
         f"--dataset.repo_id={resolved_repo_id}",
         f"--dataset.root={path}",
-        f"--policy.type={policy_type}",
-        f"--output_dir={output_dir}",
-        f"--job_name={job_name}",
-        f"--policy.device={training['device']}",
-        f"--dataset.video_backend={training['video_backend']}",
-        f"--steps={training['steps']}",
-        f"--batch_size={training['batch_size']}",
-        f"--log_freq={training['log_freq']}",
-        f"--save_freq={training['save_freq']}",
-        f"--wandb.enable={str(training['wandb_enable']).lower()}",
-        f"--policy.repo_id={policy_repo_id}",
-        f"--policy.push_to_hub={str(training.get('push_to_hub', False)).lower()}",
     ]
-    
+
+    # X-VLA 必须用 --policy.path 加载预训练配置（含 Florence2）；
+    # 仅 --policy.type=xvla 会缺少 florence_config，无法正常微调。
+    if policy_type == "xvla":
+        policy_path = (
+            training.get("policy_path")
+            or training.get("pretrained_path")
+            or "lerobot/xvla-base"
+        )
+        cmd.append(f"--policy.path={policy_path}")
+    else:
+        cmd.append(f"--policy.type={policy_type}")
+
+    cmd.extend(
+        [
+            f"--output_dir={output_dir}",
+            f"--job_name={job_name}",
+            f"--policy.device={training['device']}",
+            f"--dataset.video_backend={training['video_backend']}",
+            f"--steps={training['steps']}",
+            f"--batch_size={training['batch_size']}",
+            f"--log_freq={training['log_freq']}",
+            f"--save_freq={training['save_freq']}",
+            f"--wandb.enable={str(training['wandb_enable']).lower()}",
+            f"--policy.repo_id={policy_repo_id}",
+            f"--policy.push_to_hub={str(training.get('push_to_hub', False)).lower()}",
+        ]
+    )
+
+    if "num_workers" in training:
+        cmd.append(f"--num_workers={int(training['num_workers'])}")
+
     # 添加容差参数（如果配置中有的话）
     if "tolerance_s" in training:
         cmd.append(f"--tolerance_s={training['tolerance_s']}")
 
+    # 数据集相机名 → 预训练策略期望名（X-VLA 等常见为 image/image2/image3）
+    rename_map = training.get("rename_map")
+    if rename_map:
+        cmd.append(f"--rename_map={json.dumps(rename_map)}")
+
     append_act_piper_policy_options(cmd, training)
     append_pi05_policy_options(cmd, training)
+    append_xvla_policy_options(cmd, training)
     append_training_episodes(cmd, path, training)
     return cmd
+
+
+def append_xvla_policy_options(cmd: list[str], training: dict[str, Any]) -> None:
+    if training.get("policy_type") != "xvla":
+        return
+
+    if "dtype" in training:
+        cmd.append(f"--policy.dtype={training['dtype']}")
+
+    if "action_mode" in training:
+        cmd.append(f"--policy.action_mode={training['action_mode']}")
+
+    if "max_action_dim" in training:
+        cmd.append(f"--policy.max_action_dim={int(training['max_action_dim'])}")
+
+    if "chunk_size" in training:
+        cmd.append(f"--policy.chunk_size={int(training['chunk_size'])}")
+
+    if "n_action_steps" in training:
+        cmd.append(f"--policy.n_action_steps={int(training['n_action_steps'])}")
+
+    if "num_denoising_steps" in training:
+        cmd.append(f"--policy.num_denoising_steps={int(training['num_denoising_steps'])}")
+
+    for key in (
+        "freeze_vision_encoder",
+        "freeze_language_encoder",
+        "train_policy_transformer",
+        "train_soft_prompts",
+        "use_proprio",
+    ):
+        if key in training:
+            cmd.append(f"--policy.{key}={str(training[key]).lower()}")
+
+    normalization_mapping = training.get("normalization_mapping")
+    if normalization_mapping:
+        cmd.append(f"--policy.normalization_mapping={json.dumps(normalization_mapping)}")
 
 
 def append_pi05_policy_options(cmd: list[str], training: dict[str, Any]) -> None:

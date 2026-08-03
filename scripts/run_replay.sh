@@ -4,7 +4,7 @@ set -euo pipefail
 
 LEFT_CAN="${LEFT_CAN:-can2}"
 RIGHT_CAN="${RIGHT_CAN:-can0}"
-DATASET_ROOT="${DATASET_ROOT:-data/lerobot/local/cube_cam_adjustment_ojag_cams-right-front-side}"
+DATASET_ROOT="${DATASET_ROOT:-data/lerobot/local/towel_xvla_v1}"
 #cube_v727_yjw_ojag, cube_cam_adjustment, cube_small_dataset
 EPISODE_INDEX="${EPISODE_INDEX:-0}"
 

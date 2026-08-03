@@ -1,7 +1,7 @@
 {
-  "task": "pick up the orange cube from the table and put it in the bowl",
+  "task": "fold the blue towel",
   "dataset_format": "lerobot",
-  "repo_id": "local/cube_cam_adjustment_v2",
+  "repo_id": "local/towel_act",
   "root": "data/lerobot",
   "robot_type": "piper",
   "no_videos": false,
@@ -10,9 +10,9 @@
   "output_dir": "data/raw",
   "fps": 20.0,
   "duration": null,
-  "follower_left_can": null,
+  "follower_left_can": "can2",
   "follower_right_can": "can0",
-  "leader_left_can": null,
+  "leader_left_can": "can2",
   "leader_right_can": "can0",
   "camera_width": 640,
   "camera_height": 480,
@@ -23,13 +23,13 @@
   "recording_notes": "本地 ACT：cube_pi05_v5 离线 SG 平滑后重训；腕相权重 2.5。",
   "training": {
     "policy_type": "act_piper",
-    "job_name": "cube_cam_adjustment_v2",
-    "output_dir": "outputs/train/cube_cam_adjustment_v2",
-    "camera_names": ["cam_right", "cam_front", "cam_side"],
+    "job_name": "towel_act",
+    "output_dir": "outputs/train/towel_act",
+    "camera_names": ["cam_right", "cam_top", "cam_left"],
     "camera_scales": {
       "cam_right": 1.0,
-      "cam_side": 1.0,
-      "cam_front": 1.0
+      "cam_left": 1.0,
+      "cam_top": 1.0
     },
     "learnable_camera_scales": false,
     "use_camera_id_embed": true,
@@ -49,9 +49,9 @@
     "pytorch_alloc_conf": "expandable_segments:True"
   },
   "policy_live": {
-    "policy_path": "outputs/train/cube_cam_adjustment_v2/checkpoints/last/pretrained_model",
-    "repo_id": "local/cube_cam_adjustment_v2",
-    "dataset_root": "data/lerobot/local/cube_cam_adjustment_v2",
+    "policy_path": "outputs/train/towel_act/checkpoints/last/pretrained_model",
+    "repo_id": "local/towel_act",
+    "dataset_root": "data/lerobot/local/towel_act",
     "video_backend": "pyav",
     "device": "cuda",
     "execute": true,
@@ -73,12 +73,12 @@
         "ref": 16
       },
       {
-        "name": "cam_side",
+        "name": "cam_left",
         "ref": 6
       },
       {
-        "name": "cam_front",
-        "ref": 14
+        "name": "cam_top",
+        "ref": 18
       }
     ],
     "pace_by_reach": false,
@@ -94,7 +94,7 @@
       "ref": 16
     },
     {
-      "name": "cam_side",
+      "name": "cam_left",
       "ref": 6
     },
     {

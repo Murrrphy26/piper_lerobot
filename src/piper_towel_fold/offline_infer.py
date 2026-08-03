@@ -154,8 +154,16 @@ def load_policy(
     if num_inference_steps is not None:
         if num_inference_steps <= 0:
             raise ValueError("num_inference_steps must be greater than 0.")
-        config.num_inference_steps = num_inference_steps
-        overrides.append(f"num_inference_steps={num_inference_steps}")
+        # pi0/pi05: num_inference_steps；xvla: num_denoising_steps
+        if hasattr(config, "num_denoising_steps") and not hasattr(config, "num_inference_steps"):
+            config.num_denoising_steps = num_inference_steps
+            overrides.append(f"num_denoising_steps={num_inference_steps}")
+        elif hasattr(config, "num_denoising_steps") and getattr(config, "type", None) == "xvla":
+            config.num_denoising_steps = num_inference_steps
+            overrides.append(f"num_denoising_steps={num_inference_steps}")
+        else:
+            config.num_inference_steps = num_inference_steps
+            overrides.append(f"num_inference_steps={num_inference_steps}")
 
     if device == "cuda" and torch.cuda.is_available():
         torch.cuda.empty_cache()
