@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 REPO_ID="${REPO_ID:-local/piper_pick_cube}"
 ROOT="${ROOT:-data/lerobot}"
 POLICY_TYPE="${POLICY_TYPE:-act}"
@@ -16,6 +19,10 @@ SAVE_FREQ="${SAVE_FREQ:-1000}"
 WANDB_ENABLE="${WANDB_ENABLE:-false}"
 VIDEO_BACKEND="${VIDEO_BACKEND:-pyav}"
 PYTORCH_ALLOC_CONF_DEFAULT="${PYTORCH_ALLOC_CONF_DEFAULT:-expandable_segments:True}"
+OUTCOME_FILTER="${OUTCOME_FILTER:-exclude-failures}"
+INCLUDE_UNKNOWN="${INCLUDE_UNKNOWN:-false}"
+EXCLUDE_UNLABELED="${EXCLUDE_UNLABELED:-true}"
+EPISODES="${EPISODES:-}"
 
 DATASET_ROOT="${DATASET_ROOT:-${ROOT}/${REPO_ID}}"
 
@@ -85,6 +92,37 @@ if [[ -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
   export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_ALLOC_CONF_DEFAULT}"
 fi
 
+EPISODE_ARGS=()
+if [[ -n "${EPISODES}" ]]; then
+  EPISODE_ARGS=(--dataset.episodes="${EPISODES}")
+else
+  TRAINING_EPISODES="$(
+    PYTHONPATH="${REPO_ROOT:-.}/src${PYTHONPATH:+:${PYTHONPATH}}" python - "${DATASET_ROOT}" "${OUTCOME_FILTER}" "${INCLUDE_UNKNOWN}" "${EXCLUDE_UNLABELED}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from piper_towel_fold.episode_outcomes import resolve_training_episodes
+
+dataset_root = Path(sys.argv[1])
+training = {
+    "outcome_filter": sys.argv[2],
+    "include_unknown": sys.argv[3].lower() in {"1", "true", "yes"},
+    "exclude_unlabeled": sys.argv[4].lower() not in {"0", "false", "no"},
+}
+episodes = resolve_training_episodes(dataset_root, training)
+if episodes is not None:
+    print(json.dumps(episodes))
+PY
+  )"
+  if [[ -n "${TRAINING_EPISODES}" ]]; then
+    EPISODE_ARGS=(--dataset.episodes="${TRAINING_EPISODES}")
+    echo "Outcome filter: ${OUTCOME_FILTER}"
+    echo "Training episodes: ${TRAINING_EPISODES}"
+    echo
+  fi
+fi
+
 lerobot-train \
   --dataset.repo_id="${REPO_ID}" \
   --dataset.root="${DATASET_ROOT}" \
@@ -98,4 +136,6 @@ lerobot-train \
   --log_freq="${LOG_FREQ}" \
   --save_freq="${SAVE_FREQ}" \
   --wandb.enable="${WANDB_ENABLE}" \
-  --policy.repo_id="${POLICY_REPO_ID}"
+  --policy.repo_id="${POLICY_REPO_ID}" \
+  --policy.push_to_hub=false \
+  "${EPISODE_ARGS[@]}"

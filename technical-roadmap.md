@@ -553,10 +553,10 @@ LeRobot 当前支持 `lerobot-rollout --strategy.type=dagger` 的 human-in-the-l
 
 ## 12. 项目目录建议
 
-建议在 `piper-towel-fold` 下按下面组织：
+建议在 `piper` 下按下面组织：
 
 ```text
-piper-towel-fold/
+piper/
 ├── technical-roadmap.md
 ├── docs/
 │   ├── task-definition.md

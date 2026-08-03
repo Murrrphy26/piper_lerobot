@@ -10,12 +10,12 @@ def load_config(config_path: Path) -> dict:
     return data
 
 
-def cameras_to_csv(config: dict) -> tuple[str, str]:
-    cameras = config.get("cameras", [])
+def cameras_to_csv(config: dict, key: str = "cameras") -> tuple[str, str]:
+    cameras = config.get(key, [])
     if not cameras:
         return "", ""
     if not isinstance(cameras, list):
-        raise ValueError("'cameras' must be a list.")
+        raise ValueError(f"'{key}' must be a list.")
 
     camera_names: list[str] = []
     camera_refs: list[str] = []
@@ -32,23 +32,29 @@ def cameras_to_csv(config: dict) -> tuple[str, str]:
     return ",".join(camera_refs), ",".join(camera_names)
 
 
+SKIP_CONFIG_KEYS = {"cameras", "training", "policy_live", "preprocessing"}
+
+
 def build_namespace(config: dict) -> argparse.Namespace:
     from .record_episode import build_arg_parser
 
     parser = build_arg_parser()
     args = parser.parse_args([])
 
-    camera_indices, camera_names = cameras_to_csv(config)
+    camera_indices, camera_names = cameras_to_csv(config, "recording_cameras")
+    if not camera_indices:
+        camera_indices, camera_names = cameras_to_csv(config)
     if camera_indices:
         config["camera_indices"] = camera_indices
         config["camera_names"] = camera_names
 
     for key, value in config.items():
-        if key == "cameras":
+        if key in SKIP_CONFIG_KEYS:
             continue
-        if not hasattr(args, key):
-            raise ValueError(f"Unsupported config key: {key}")
-        setattr(args, key, value)
+        if hasattr(args, key):
+            setattr(args, key, value)
+
+    args.preprocessing = config.get("preprocessing")
     return args
 
 

@@ -1,49 +1,22 @@
-import argparse
-from pathlib import Path
-
 import cv2
+import os
 
+# 创建测试目录
+os.makedirs('camera_test', exist_ok=True)
 
-def parse_csv(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
-def parse_camera_ref(value: str) -> int | str:
-    return int(value) if value.isdigit() else value
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Probe OpenCV cameras and save snapshots.")
-    parser.add_argument(
-        "--indices",
-        default="0,1,2,3,4,5",
-        help="Comma-separated camera indices or paths to test.",
-    )
-    parser.add_argument("--output-dir", default="data/camera_probe", help="Snapshot output directory.")
-    parser.add_argument("--width", type=int, default=640, help="Requested capture width.")
-    parser.add_argument("--height", type=int, default=480, help="Requested capture height.")
-    args = parser.parse_args()
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for camera_ref in parse_csv(args.indices):
-        capture = cv2.VideoCapture(parse_camera_ref(camera_ref))
-        capture.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
-        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
-
-        ok, frame = capture.read()
-        capture.release()
-
-        if not ok or frame is None:
-            print(f"{camera_ref}: failed")
-            continue
-
-        safe_name = camera_ref.replace("/", "_")
-        image_path = output_dir / f"camera_{safe_name}.jpg"
-        cv2.imwrite(str(image_path), frame)
-        print(f"{camera_ref}: ok -> {image_path}")
-
-
-if __name__ == "__main__":
-    main()
+# 测试所有video节点
+for i in range(15):
+    dev = f'/dev/video{i}'
+    cap = cv2.VideoCapture(dev)
+    if cap.isOpened():
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            h, w = frame.shape[:2]
+            filename = f'camera_test/video{i}_{w}x{h}.jpg'
+            cv2.imwrite(filename, frame)
+            print(f'✅ video{i}: {w}x{h} -> 保存到 {filename}')
+        else:
+            print(f'⚠️ video{i}: 能打开但无法读取帧')
+        cap.release()
+    else:
+        print(f'❌ video{i}: 无法打开')

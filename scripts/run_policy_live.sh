@@ -1,80 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 真机推理入口：先按同一 config 回到数据集 episode0 初始位姿，再跑 policy live。
+#
+# 用法：
+#   bash scripts/run_policy_live.sh configs/fyx.json
+#   SKIP_MOVE_TO_START=true bash scripts/run_policy_live.sh configs/fyx.json   # 跳过归位
+#
+# 环境变量：
+#   SKIP_MOVE_TO_START  默认 false；true 时跳过 move_to_episode_start
+
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
+
+CONFIG_PATH="${1:-configs/record_pick_cube.json}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+SKIP_MOVE_TO_START="${SKIP_MOVE_TO_START:-false}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-POLICY_PATH="${POLICY_PATH:-outputs/train/act_piper_pick_cube/checkpoints/last/pretrained_model}"
-REPO_ID="${REPO_ID:-local/piper_pick_cube}"
-DATASET_ROOT="${DATASET_ROOT:-data/lerobot/local/piper_pick_cube}"
-VIDEO_BACKEND="${VIDEO_BACKEND:-pyav}"
-TASK="${TASK:-pick_cube}"
-DURATION="${DURATION:-10}"
-FPS="${FPS:-10}"
-DEVICE="${DEVICE:-cuda}"
-EXECUTE="${EXECUTE:-false}"
-
-FOLLOWER_LEFT_CAN="${FOLLOWER_LEFT_CAN:-can2}"
-FOLLOWER_RIGHT_CAN="${FOLLOWER_RIGHT_CAN:-can0}"
-
-# Current verified camera mapping:
-# OpenCV 2 -> top view, OpenCV 4 -> left view, OpenCV 0 -> right view.
-CAMERA_INDICES="${CAMERA_INDICES:-2,4,0}"
-CAMERA_NAMES="${CAMERA_NAMES:-cam_top,cam_left,cam_right}"
-CAMERA_WIDTH="${CAMERA_WIDTH:-640}"
-CAMERA_HEIGHT="${CAMERA_HEIGHT:-480}"
-CAMERA_FPS="${CAMERA_FPS:-30}"
-
-CONTROL_SPEED="${CONTROL_SPEED:-10}"
-MAX_JOINT_STEP_RAD="${MAX_JOINT_STEP_RAD:-0.025}"
-MAX_GRIPPER_STEP_M="${MAX_GRIPPER_STEP_M:-0.001}"
-SMOOTHING_ALPHA="${SMOOTHING_ALPHA:-0.25}"
-PACE_BY_REACH="${PACE_BY_REACH:-false}"
-ADVANCE_THRESHOLD_RAD="${ADVANCE_THRESHOLD_RAD:-0.08}"
-MAX_HOLD_STEPS="${MAX_HOLD_STEPS:-30}"
-PRINT_EVERY="${PRINT_EVERY:-1}"
-LOG_JSONL="${LOG_JSONL:-}"
-
-args=(
-  -m
-  piper_towel_fold.run_policy_live
-  --policy-path "$POLICY_PATH"
-  --repo-id "$REPO_ID"
-  --dataset-root "$DATASET_ROOT"
-  --video-backend "$VIDEO_BACKEND"
-  --task "$TASK"
-  --duration "$DURATION"
-  --fps "$FPS"
-  --device "$DEVICE"
-  --follower-left-can "$FOLLOWER_LEFT_CAN"
-  --follower-right-can "$FOLLOWER_RIGHT_CAN"
-  --camera-indices "$CAMERA_INDICES"
-  --camera-names "$CAMERA_NAMES"
-  --camera-width "$CAMERA_WIDTH"
-  --camera-height "$CAMERA_HEIGHT"
-  --camera-fps "$CAMERA_FPS"
-  --control-speed "$CONTROL_SPEED"
-  --max-joint-step-rad "$MAX_JOINT_STEP_RAD"
-  --max-gripper-step-m "$MAX_GRIPPER_STEP_M"
-  --smoothing-alpha "$SMOOTHING_ALPHA"
-  --advance-threshold-rad "$ADVANCE_THRESHOLD_RAD"
-  --max-hold-steps "$MAX_HOLD_STEPS"
-  --print-every "$PRINT_EVERY"
-)
-
-if [[ "$PACE_BY_REACH" == "true" ]]; then
-  args+=(--pace-by-reach)
+if [[ "${SKIP_MOVE_TO_START}" != "true" ]]; then
+  echo "=== [1/2] Move to episode start (config=${CONFIG_PATH}) ==="
+  bash "${SCRIPT_DIR}/run_move_to_episode_start.sh" "${CONFIG_PATH}"
+  echo
+  echo "=== [2/2] Start policy live ==="
+else
+  echo "SKIP_MOVE_TO_START=true：跳过归位，直接推理。"
 fi
 
-if [[ -n "$LOG_JSONL" ]]; then
-  args+=(--log-jsonl "$LOG_JSONL")
-fi
-
-if [[ "$EXECUTE" == "true" ]]; then
-  args+=(--execute)
-fi
-
-python "${args[@]}"
+python -m piper_towel_fold.start_policy_live --config "${CONFIG_PATH}" "$@"

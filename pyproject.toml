@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_policy_act_piper"
+version = "0.1.0"
+description = "ACT policy with per-camera feature scaling and camera ID embeddings for Piper cube picking"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["lerobot", "torch", "torchvision", "einops"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

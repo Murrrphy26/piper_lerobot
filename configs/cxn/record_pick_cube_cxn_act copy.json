@@ -1,0 +1,116 @@
+{
+  "task": "pick up the orange cube from the table and put it in the bowl",
+  "dataset_format": "lerobot",
+  "repo_id": "local/cube_v727_cxn",
+  "root": "data/lerobot",
+  "robot_type": "piper",
+  "no_videos": false,
+  "prompt_outcome": true,
+  "episode_outcome": "skip",
+  "output_dir": "data/raw",
+  "fps": 20.0,
+  "duration": null,
+  "follower_left_can": null,
+  "follower_right_can": "can0",
+  "leader_left_can": null,
+  "leader_right_can": "can0",
+  "camera_width": 640,
+  "camera_height": 480,
+  "camera_fps": 30,
+  "image_format": "jpg",
+  "image_quality": 95,
+  "action_source": "leader",
+  "recording_notes": "训练/推理专用。录制仍为 leader action；训练通过 training.action_compose=obs_joints_action_gripper 自动生成 *_ojag 数据集（关节监督用 observation.state，夹爪监督用 action），与 replay --source obs_joints_action_gripper 对齐。ACT 时域：chunk_size=200 / n_action_steps=100 @ 20fps ≈ 10s 视野。",
+  "training": {
+    "policy_type": "act_piper",
+    "job_name": "act_piper_cube_v727_cxn_ojag",
+    "output_dir": "outputs/train/act_piper_cube_v727_cxn_ojag",
+    "action_compose": "obs_joints_action_gripper",
+    "action_compose_repo_id": "local/cube_v727_cxn_ojag",
+    "action_compose_overwrite": false,
+    "camera_scales": {
+      "cam_right": 1.0,
+      "cam_side": 1.0,
+      "cam_top": 1.0
+    },
+    "learnable_camera_scales": false,
+    "use_camera_id_embed": true,
+    "chunk_size": 200,
+    "n_action_steps": 100,
+    "device": "cuda",
+    "steps": 10000,
+    "batch_size": 4,
+    "log_freq": 100,
+    "save_freq": 1000,
+    "wandb_enable": false,
+    "video_backend": "pyav",
+    "outcome_filter": "exclude-failures",
+    "include_unknown": false,
+    "exclude_unlabeled": true,
+    "push_to_hub": false,
+    "pytorch_alloc_conf": "expandable_segments:True"
+  },
+  "policy_live": {
+    "policy_path": "outputs/train/act_piper_cube_v727_cxn_ojag/checkpoints/last/pretrained_model",
+    "repo_id": "local/cube_v727_cxn_ojag",
+    "dataset_root": "data/lerobot/local/cube_v727_cxn_ojag",
+    "video_backend": "pyav",
+    "device": "cuda",
+    "execute": true,
+    "duration": 60.0,
+    "fps": 20.0,
+    "control_hz": 20.0,
+    "use_action_chunk_stream": true,
+    "prefetch_remaining": 15,
+    "chunk_blend_steps": 15,
+    "n_action_steps": 100,
+    "control_speed": 12,
+    "max_joint_step_rad": 0.02,
+    "max_gripper_step_m": 0.002,
+    "gripper_effort": 1000,
+    "smoothing_alpha": 0.20,
+    "pace_by_reach": false,
+    "advance_threshold_rad": 0.08,
+    "max_hold_steps": 30,
+    "print_every": 5,
+    "log_jsonl": "auto",
+    "omit_error_logs": true
+  },
+  "cameras": [
+    {
+      "name": "cam_right",
+      "ref": 8
+    },
+    {
+      "name": "cam_side",
+      "ref": 6
+    },
+    {
+      "name": "cam_top",
+      "ref": 10
+    }
+  ],
+  "preprocessing": {
+    "enabled": false,
+    "images": {
+      "enabled": false,
+      "white_balance": true,
+      "clahe_clip_limit": 2.0,
+      "clahe_tile_grid_size": 8,
+      "orange_boost": {
+        "enabled": true,
+        "hue_range": [5, 25],
+        "sat_scale": 1.2,
+        "val_scale": 1.05
+      }
+    },
+    "smoothing": {
+      "enabled": false,
+      "method": "ema",
+      "ema_alpha": 0.25,
+      "gripper_ema_alpha": 0.35,
+      "savgol_window": 7,
+      "savgol_polyorder": 2
+    }
+  }
+}

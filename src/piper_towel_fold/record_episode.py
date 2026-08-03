@@ -8,7 +8,12 @@ from lerobot.cameras.opencv import OpenCVCameraConfig
 
 from .config import PiperRobotConfig
 from .piper import PiperRobot
-from .recorder import LeRobotEpisodeRecorder, PiperEpisodeRecorder
+from .preprocessing import (
+    FramePreprocessor,
+    load_preprocessing_config,
+    resolve_augmented_repo_id,
+)
+from .recorder import DualLeRobotEpisodeRecorder, LeRobotEpisodeRecorder, PiperEpisodeRecorder
 
 
 def resolve_action_source(args: argparse.Namespace) -> str:
@@ -59,6 +64,7 @@ def write_episode_outcome(
     task: str,
     outcome: str,
     stop_reason: str,
+    episode_index: int | None = None,
 ) -> None:
     if outcome == "skip":
         return
@@ -71,6 +77,8 @@ def write_episode_outcome(
         "outcome": outcome,
         "stop_reason": stop_reason,
     }
+    if episode_index is not None:
+        outcome_record["episode_index"] = episode_index
     with outcome_path.open("a", encoding="utf-8") as outcome_file:
         outcome_file.write(json.dumps(outcome_record, ensure_ascii=False) + "\n")
 
@@ -175,13 +183,63 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--fps must be greater than 0.")
 
 
+def make_lerobot_recorder(
+    args: argparse.Namespace,
+    repo_id: str,
+    camera_names: list[str],
+    camera_shape: tuple[int, int, int],
+) -> LeRobotEpisodeRecorder:
+    return LeRobotEpisodeRecorder(
+        root=args.root,
+        repo_id=repo_id,
+        task=args.task,
+        fps=int(args.fps),
+        camera_names=camera_names,
+        camera_shape=camera_shape,
+        robot_type=args.robot_type,
+        use_videos=not args.no_videos,
+    )
+
+
+def write_episode_outcomes(
+    dataset_paths: list[Path],
+    task: str,
+    outcome: str,
+    stop_reason: str,
+    dataset_format: str,
+) -> None:
+    for dataset_path in dataset_paths:
+        episode_index: int | None = None
+        if dataset_format == "lerobot":
+            try:
+                from .episode_outcomes import read_episode_count
+
+                episode_index = read_episode_count(dataset_path) - 1
+            except (FileNotFoundError, ValueError, json.JSONDecodeError):
+                episode_index = None
+        write_episode_outcome(
+            dataset_path=dataset_path,
+            task=task,
+            outcome=outcome,
+            stop_reason=stop_reason,
+            episode_index=episode_index,
+        )
+
+
 def run_recording(args: argparse.Namespace) -> None:
     validate_args(args)
 
     camera_configs = make_camera_configs(args)
     action_source = resolve_action_source(args)
-    if action_source == "leader" and not (args.leader_left_can and args.leader_right_can):
-        raise ValueError("Leader action recording requires both --leader-left-can and --leader-right-can.")
+    if action_source == "leader":
+        # 共 CAN 时可只配 follower：从同一总线 sniff GetArm*Ctrl 作为主臂 action。
+        has_leader = bool(args.leader_left_can or args.leader_right_can)
+        has_follower = bool(args.follower_left_can or args.follower_right_can)
+        if not (has_leader or has_follower):
+            raise ValueError(
+                "Leader action recording needs at least one CAN "
+                "(--leader-*-can and/or --follower-*-can) to sniff GetArm*Ctrl."
+            )
 
     config = PiperRobotConfig(
         leader_left_port=args.leader_left_can,
@@ -194,38 +252,92 @@ def run_recording(args: argparse.Namespace) -> None:
     period = 1.0 / args.fps
     started_at = time.monotonic()
     camera_shape = (args.camera_height, args.camera_width, 3)
+    camera_names = list(camera_configs.keys())
+    preprocessing_config = load_preprocessing_config(getattr(args, "preprocessing", None))
+    frame_preprocessor = (
+        FramePreprocessor(preprocessing_config, mode="online")
+        if preprocessing_config.active
+        else None
+    )
+    use_dual_record = (
+        args.dataset_format == "lerobot"
+        and preprocessing_config.dual_record_active
+    )
+    augmented_repo_id = resolve_augmented_repo_id(
+        args.repo_id,
+        preprocessing_config.dual_record.augmented_repo_id,
+    )
+    if use_dual_record:
+        print("Dual recording enabled.")
+        print(f"  raw dataset: {args.root}/{args.repo_id}")
+        print(f"  augmented dataset: {args.root}/{augmented_repo_id}")
+    elif frame_preprocessor is not None:
+        print("Frame preprocessing enabled for recording.")
+    if action_source == "leader":
+        print("Leader-follower teleop recording enabled.")
+        print(f"  observation: follower feedback GetArm*Msgs ({args.follower_left_can}, {args.follower_right_can})")
+        print(
+            "  action: leader command GetArm*Ctrl "
+            f"({args.leader_left_can or args.follower_left_can}, "
+            f"{args.leader_right_can or args.follower_right_can})"
+        )
+        print("  Keep leader aviation plugs connected; do NOT unplug masters or run reset while recording.")
+        print("  Move the leader arms; followers should track via Piper teleop.")
+    else:
+        print("Follower recording enabled (observation and action from follower CAN).")
+        print(f"  follower CAN: left={args.follower_left_can}, right={args.follower_right_can}")
+        print("  Both observation and action come from follower feedback (GetArm*Msgs).")
     stop_reason = "completed"
-    episode_path: Path | None = None
+    dataset_paths: list[Path] = []
     stop_requested, previous_sigint_handler = install_stop_handler()
 
     try:
         robot.connect()
         if args.dataset_format == "lerobot":
-            recorder_context = LeRobotEpisodeRecorder(
-                root=args.root,
-                repo_id=args.repo_id,
-                task=args.task,
-                fps=int(args.fps),
-                camera_names=list(camera_configs.keys()),
-                camera_shape=camera_shape,
-                robot_type=args.robot_type,
-                use_videos=not args.no_videos,
-            )
+            if use_dual_record:
+                recorder_context = DualLeRobotEpisodeRecorder(
+                    raw_recorder=make_lerobot_recorder(
+                        args,
+                        repo_id=args.repo_id,
+                        camera_names=camera_names,
+                        camera_shape=camera_shape,
+                    ),
+                    augmented_recorder=make_lerobot_recorder(
+                        args,
+                        repo_id=augmented_repo_id,
+                        camera_names=camera_names,
+                        camera_shape=camera_shape,
+                    ),
+                )
+            else:
+                recorder_context = make_lerobot_recorder(
+                    args,
+                    repo_id=args.repo_id,
+                    camera_names=camera_names,
+                    camera_shape=camera_shape,
+                )
         else:
             recorder_context = PiperEpisodeRecorder(
                 output_dir=args.output_dir,
                 task=args.task,
                 fps=args.fps,
                 action_source=action_source,
-                camera_names=list(camera_configs.keys()),
+                camera_names=camera_names,
                 image_format=args.image_format,
                 image_quality=args.image_quality,
             )
 
         with recorder_context as recorder:
-            episode_path = Path(recorder.episode_dir)
-            print(f"Recording to {recorder.episode_dir}")
+            if use_dual_record:
+                dataset_paths = recorder.episode_dirs
+                print(f"Recording raw to {dataset_paths[0]}")
+                print(f"Recording augmented to {dataset_paths[1]}")
+            else:
+                dataset_paths = [Path(recorder.episode_dir)]
+                print(f"Recording to {dataset_paths[0]}")
             print("Press Ctrl+C once to stop after the current frame and save the episode.")
+            if frame_preprocessor is not None:
+                frame_preprocessor.reset()
             while True:
                 loop_started_at = time.monotonic()
                 observation = robot.get_observation()
@@ -238,7 +350,28 @@ def run_recording(args: argparse.Namespace) -> None:
                         if key.endswith(".pos")
                     }
 
-                recorder.record_frame(observation=observation, action=action)
+                if use_dual_record:
+                    raw_observation = observation
+                    raw_action = action
+                    augmented_observation, augmented_action = frame_preprocessor.process_frame(
+                        observation,
+                        action,
+                        camera_names,
+                    )
+                    recorder.record_frame(
+                        raw_observation=raw_observation,
+                        raw_action=raw_action,
+                        augmented_observation=augmented_observation,
+                        augmented_action=augmented_action,
+                    )
+                else:
+                    if frame_preprocessor is not None and frame_preprocessor.enabled:
+                        observation, action = frame_preprocessor.process_frame(
+                            observation,
+                            action,
+                            camera_names,
+                        )
+                    recorder.record_frame(observation=observation, action=action)
 
                 if stop_requested["value"]:
                     stop_reason = "manual"
@@ -258,13 +391,14 @@ def run_recording(args: argparse.Namespace) -> None:
         if robot.is_connected:
             robot.disconnect()
 
-    if episode_path is not None:
+    if dataset_paths:
         outcome = prompt_episode_outcome() if args.prompt_outcome else args.episode_outcome
-        write_episode_outcome(
-            dataset_path=episode_path,
+        write_episode_outcomes(
+            dataset_paths=dataset_paths,
             task=args.task,
             outcome=outcome,
             stop_reason=stop_reason,
+            dataset_format=args.dataset_format,
         )
 
 
