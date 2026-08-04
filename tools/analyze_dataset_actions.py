@@ -3,7 +3,7 @@ from typing import Any
 
 import torch
 
-from piper_towel_fold.offline_infer import get_episode_bounds, load_dataset
+from piper_train.offline_infer import get_episode_bounds, load_dataset
 
 
 def parse_args() -> argparse.Namespace:

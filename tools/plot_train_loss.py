@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from piper_towel_fold.train_loss import (
+from piper_train.train_loss import (
     analyze,
     parse_log_text,
     print_report,

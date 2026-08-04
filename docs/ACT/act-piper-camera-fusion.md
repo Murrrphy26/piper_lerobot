@@ -98,7 +98,7 @@ feat = proj(backbone(img)) × α_cam + camera_id_embed[cam_idx]
 
 | 文件 | 改动 |
 |------|------|
-| `src/piper_towel_fold/start_training.py` | 新增 `append_act_piper_policy_options()`，向 `lerobot-train` 透传 `--policy.camera_scales` 等参数 |
+| `src/piper_train/start_training.py` | 新增 `append_act_piper_policy_options()`，向 `lerobot-train` 透传 `--policy.camera_scales` 等参数 |
 | `configs/record_pick_cube.json` | `policy_type` 改为 `act_piper`，写入默认相机权重与输出路径 |
 
 ### 3.3 未改动部分
@@ -242,7 +242,7 @@ python -c "import lerobot_policy_act_piper; from lerobot.configs.policies import
 
 ```bash
 # 预览命令
-python -m piper_towel_fold.start_training --config configs/record_pick_cube.json --dry-run
+python -m piper_train.start_training --config configs/record_pick_cube.json --dry-run
 
 # 正式训练
 bash scripts/start_training.sh configs/record_pick_cube.json
@@ -345,7 +345,7 @@ piper/
 │   │   ├── configuration_act_piper.py          # ACTPiperConfig
 │   │   ├── modeling_act_piper.py               # ACTPiper / ACTPiperPolicy
 │   │   └── processor_act_piper.py
-│   └── piper_towel_fold/
+│   └── piper_train/
 │       └── start_training.py                   # 透传 act_piper 超参
 └── scripts/start_training.sh                   # 训练入口
 ```

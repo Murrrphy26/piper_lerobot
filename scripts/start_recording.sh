@@ -8,4 +8,4 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-python -m piper_towel_fold.start_recording --config "$CONFIG_PATH"
+python -m piper_train.start_recording --config "$CONFIG_PATH"

@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from lerobot.cameras.opencv import OpenCVCameraConfig
 
+from .action_pipeline import ActionPipeline, ActionSafetyConfig, make_fk_provider_from_namespace
+from .action_pipeline import smooth_action as pipeline_smooth_action
 from .config import PiperRobotConfig
 from .offline_infer import (
     action_tensor_to_dict,
@@ -344,13 +346,12 @@ def smooth_action(
     previous_action: dict[str, float] | None,
     alpha: float,
 ) -> dict[str, float]:
-    if previous_action is None:
-        return dict(action)
+    """Backward-compatible wrapper for older imports.
 
-    return {
-        key: previous_action.get(key, value) * (1.0 - alpha) + value * alpha
-        for key, value in action.items()
-    }
+    New live paths should use :class:`ActionPipeline` so smoothing and safety
+    filtering have one shared implementation.
+    """
+    return pipeline_smooth_action(action, previous_action, alpha)
 
 
 def lerp_action(left: dict[str, float], right: dict[str, float], weight: float) -> dict[str, float]:
@@ -589,8 +590,18 @@ def right_arm_delta(left: dict[str, float], right: dict[str, float]) -> float:
     return max(abs(left[key] - right[key]) for key in keys & left.keys() & right.keys())
 
 
-def json_ready(action: dict[str, float]) -> dict[str, float]:
-    return {key: float(value) for key, value in action.items()}
+def json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [json_ready(item) for item in value]
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    if isinstance(value, (float, int, str, bool)) or value is None:
+        return value
+    return float(value)
 
 
 def get_action_names(policy_config: Any) -> list[str]:
@@ -691,6 +702,55 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--gripper-effort", type=int, default=1000)
     parser.add_argument("--smoothing-alpha", type=float, default=0.25)
+    parser.add_argument(
+        "--safety-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable optional action safety filters. Default keeps legacy behavior.",
+    )
+    parser.add_argument(
+        "--safety-on-violation",
+        choices=("hold_previous", "warn", "stop"),
+        default="hold_previous",
+        help="What to do when a safety filter reports a violation.",
+    )
+    parser.add_argument(
+        "--safety-left-min-z-m",
+        type=float,
+        default=None,
+        help="Optional calibrated left end-effector minimum z in meters. Requires FK provider.",
+    )
+    parser.add_argument(
+        "--safety-right-min-z-m",
+        type=float,
+        default=None,
+        help="Optional calibrated right end-effector minimum z in meters. Requires FK provider.",
+    )
+    parser.add_argument(
+        "--safety-allowed-below-min-m",
+        type=float,
+        default=0.0,
+        help="Allowed distance below calibrated min z before blocking, in meters.",
+    )
+    parser.add_argument(
+        "--safety-finite-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reject NaN/inf actions before sending them to the robot.",
+    )
+    parser.add_argument(
+        "--safety-fk-provider",
+        choices=("piper_sdk", "none"),
+        default="piper_sdk",
+        help="FK backend used by workspace safety checks.",
+    )
+    parser.add_argument(
+        "--safety-dh-is-offset",
+        type=int,
+        choices=(0, 1),
+        default=1,
+        help="Passed to piper_sdk.C_PiperForwardKinematics(dh_is_offset=...).",
+    )
     parser.add_argument(
         "--control-hz",
         type=float,
@@ -819,6 +879,8 @@ def run_live_policy(args: argparse.Namespace) -> None:
     period = 1.0 / effective_control_hz
     started_at = time.monotonic()
     previous_action: dict[str, float] | None = None
+    fk_provider = make_fk_provider_from_namespace(args) if args.safety_enabled else None
+    action_pipeline = ActionPipeline(ActionSafetyConfig.from_namespace(args), fk_provider=fk_provider)
     held_predicted_action: dict[str, float] | None = None
     hold_steps = 0
     camera_names = list(camera_configs.keys())
@@ -870,6 +932,12 @@ def run_live_policy(args: argparse.Namespace) -> None:
     print(f"  policy: {args.policy_path}")
     print(f"  policy_fps: {args.fps}")
     print(f"  control_hz: {effective_control_hz:.3f} (interp_substeps={interp_substeps})")
+    print(
+        "  safety: "
+        f"{'on' if action_pipeline.safety.enabled else 'off'}"
+        f" | on_violation={action_pipeline.safety.on_violation}"
+        f" | allowed_below_min_m={action_pipeline.safety.right.allowed_below_min_m:g}"
+    )
     print(f"  cameras: {', '.join(camera_names)}")
     if use_stream:
         print(
@@ -906,6 +974,7 @@ def run_live_policy(args: argparse.Namespace) -> None:
             current_action = current_action_from_observation(observation)
             if previous_action is None:
                 previous_action = current_action
+                action_pipeline.reset(current_action)
 
             policy_input = observation_to_policy_input(observation, camera_names, args.task)
             should_advance = True
@@ -939,14 +1008,20 @@ def run_live_policy(args: argparse.Namespace) -> None:
                 hold_steps += 1
             else:
                 raise RuntimeError("No held action is available.")
-            smoothed_action = smooth_action(predicted_action, previous_action, args.smoothing_alpha)
+            pipeline_result = action_pipeline.process(
+                predicted_action,
+                previous_action,
+                args.smoothing_alpha,
+            )
+            smoothed_action = pipeline_result.smoothed_action
+            filtered_action = pipeline_result.filtered_action
 
             if args.execute:
-                sent_action = robot.send_action(smoothed_action)
+                sent_action = robot.send_action(filtered_action)
                 previous_action = dict(sent_action)
             else:
-                sent_action = smoothed_action
-                previous_action = smoothed_action
+                sent_action = filtered_action
+                previous_action = filtered_action
 
             loop_s = time.monotonic() - loop_started_at
             chunks_appended = streamer.chunks_appended if streamer is not None else None
@@ -977,7 +1052,11 @@ def run_live_policy(args: argparse.Namespace) -> None:
                 "loop_s": loop_s,
                 "current_action": json_ready(current_action),
                 "predicted_action": json_ready(predicted_action),
+                "smoothed_action": json_ready(smoothed_action),
+                "filtered_action": json_ready(filtered_action),
                 "sent_action": json_ready(sent_action),
+                "safety_events": json_ready(pipeline_result.events),
+                "safety_blocked": bool(pipeline_result.blocked),
                 "pred_current_max_abs_delta": max_abs_delta(predicted_action, current_action),
                 "sent_current_max_abs_delta": max_abs_delta(sent_action, current_action),
                 "right_target_delta": right_arm_delta(predicted_action, current_action),
@@ -1018,6 +1097,13 @@ def run_live_policy(args: argparse.Namespace) -> None:
                 "smoothing_alpha": args.smoothing_alpha,
                 "control_speed": args.control_speed,
                 "max_joint_step_rad": args.max_joint_step_rad,
+                "safety_enabled": bool(action_pipeline.safety.enabled),
+                "safety_on_violation": action_pipeline.safety.on_violation,
+                "safety_allowed_below_min_m": action_pipeline.safety.right.allowed_below_min_m,
+                "safety_left_min_z_m": action_pipeline.safety.left.min_z_m,
+                "safety_right_min_z_m": action_pipeline.safety.right.min_z_m,
+                "safety_fk_provider": args.safety_fk_provider if action_pipeline.safety.enabled else None,
+                "safety_dh_is_offset": args.safety_dh_is_offset if action_pipeline.safety.enabled else None,
                 "use_action_chunk_stream": use_stream,
                 "n_action_steps": n_action_steps,
                 "prefetch_remaining": args.prefetch_remaining if use_stream else None,

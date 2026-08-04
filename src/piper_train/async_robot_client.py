@@ -17,6 +17,7 @@ from typing import Any
 import grpc
 import torch
 
+from .action_pipeline import ActionPipeline, ActionSafetyConfig, make_fk_provider_from_namespace
 from .async_features import action_names_from_dataset, observation_features_from_dataset
 from .async_image_codec import compress_observation_images
 from .async_latency import LatencyTracker
@@ -30,7 +31,6 @@ from .run_policy_live import (
     max_abs_delta,
     print_action_summary,
     right_arm_delta,
-    smooth_action,
 )
 
 
@@ -581,6 +581,8 @@ class PiperAsyncRobotClient:
         period = 1.0 / self.args.fps
         started_at = time.monotonic()
         previous_action: dict[str, float] | None = None
+        fk_provider = make_fk_provider_from_namespace(self.args) if self.args.safety_enabled else None
+        action_pipeline = ActionPipeline(ActionSafetyConfig.from_namespace(self.args), fk_provider=fk_provider)
         step = 0
         idle_steps = 0
         log_file = None
@@ -599,22 +601,25 @@ class PiperAsyncRobotClient:
                 current_action = self._current_action_from_observation(current_observation)
                 if previous_action is None:
                     previous_action = current_action
+                    action_pipeline.reset(current_action)
 
                 if self.actions_available():
                     idle_steps = 0
                     predicted_action = self.pop_action_dict()
-                    smoothed_action = smooth_action(
+                    pipeline_result = action_pipeline.process(
                         predicted_action,
                         previous_action,
                         self.args.smoothing_alpha,
                     )
+                    smoothed_action = pipeline_result.smoothed_action
+                    filtered_action = pipeline_result.filtered_action
 
                     if self.args.execute:
-                        sent_action = self.robot.send_action(smoothed_action)
+                        sent_action = self.robot.send_action(filtered_action)
                         previous_action = dict(sent_action)
                     else:
-                        sent_action = smoothed_action
-                        previous_action = smoothed_action
+                        sent_action = filtered_action
+                        previous_action = filtered_action
 
                     if step % self.args.print_every == 0:
                         print_action_summary(f"step {step:04d} pred:", predicted_action)
@@ -634,7 +639,11 @@ class PiperAsyncRobotClient:
                             "loop_s": time.monotonic() - loop_started_at,
                             "current_action": json_ready(current_action),
                             "predicted_action": json_ready(predicted_action),
+                            "smoothed_action": json_ready(smoothed_action),
+                            "filtered_action": json_ready(filtered_action),
                             "sent_action": json_ready(sent_action),
+                            "safety_events": json_ready(pipeline_result.events),
+                            "safety_blocked": bool(pipeline_result.blocked),
                         }
                         log_file.write(json.dumps(log_record, ensure_ascii=False) + "\n")
                         log_file.flush()
@@ -711,6 +720,55 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="每控制周期夹爪最大步进（米）；<=0 表示不限速")
     parser.add_argument("--gripper-effort", type=int, default=1000)
     parser.add_argument("--smoothing-alpha", type=float, default=0.25)
+    parser.add_argument(
+        "--safety-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable optional action safety filters. Default keeps legacy behavior.",
+    )
+    parser.add_argument(
+        "--safety-on-violation",
+        choices=("hold_previous", "warn", "stop"),
+        default="hold_previous",
+        help="What to do when a safety filter reports a violation.",
+    )
+    parser.add_argument(
+        "--safety-left-min-z-m",
+        type=float,
+        default=None,
+        help="Optional calibrated left end-effector minimum z in meters. Requires FK provider.",
+    )
+    parser.add_argument(
+        "--safety-right-min-z-m",
+        type=float,
+        default=None,
+        help="Optional calibrated right end-effector minimum z in meters. Requires FK provider.",
+    )
+    parser.add_argument(
+        "--safety-allowed-below-min-m",
+        type=float,
+        default=0.0,
+        help="Allowed distance below calibrated min z before blocking, in meters.",
+    )
+    parser.add_argument(
+        "--safety-finite-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reject NaN/inf actions before sending them to the robot.",
+    )
+    parser.add_argument(
+        "--safety-fk-provider",
+        choices=("piper_sdk", "none"),
+        default="piper_sdk",
+        help="FK backend used by workspace safety checks.",
+    )
+    parser.add_argument(
+        "--safety-dh-is-offset",
+        type=int,
+        choices=(0, 1),
+        default=1,
+        help="Passed to piper_sdk.C_PiperForwardKinematics(dh_is_offset=...).",
+    )
     parser.add_argument(
         "--hold-last-action-on-idle",
         action=argparse.BooleanOptionalAction,

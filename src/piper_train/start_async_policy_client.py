@@ -3,7 +3,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .start_policy_live import default_dataset_root, default_policy_path
+from .start_policy_live import (
+    SAFETY_KEY_MAP,
+    default_dataset_root,
+    default_policy_path,
+    resolve_safety_block,
+)
 from .start_recording import cameras_to_csv
 
 
@@ -95,6 +100,14 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
         "max_gripper_step_m": "max_gripper_step_m",
         "gripper_effort": "gripper_effort",
         "smoothing_alpha": "smoothing_alpha",
+        "safety_enabled": "safety_enabled",
+        "safety_on_violation": "safety_on_violation",
+        "safety_left_min_z_m": "safety_left_min_z_m",
+        "safety_right_min_z_m": "safety_right_min_z_m",
+        "safety_allowed_below_min_m": "safety_allowed_below_min_m",
+        "safety_finite_check": "safety_finite_check",
+        "safety_fk_provider": "safety_fk_provider",
+        "safety_dh_is_offset": "safety_dh_is_offset",
         "hold_last_action_on_idle": "hold_last_action_on_idle",
         "print_every": "print_every",
         "log_jsonl": "log_jsonl",
@@ -108,6 +121,14 @@ def apply_config_to_namespace(args: argparse.Namespace, config_path: Path) -> ar
     for config_key, attr_name in async_key_map.items():
         if config_key in async_cfg and hasattr(args, attr_name):
             setattr(args, attr_name, async_cfg[config_key])
+
+    safety = resolve_safety_block(config, async_cfg)
+    if safety is None:
+        safety = resolve_safety_block(config, policy_live)
+    if safety is not None:
+        for config_key, attr_name in SAFETY_KEY_MAP.items():
+            if config_key in safety:
+                setattr(args, attr_name, safety[config_key])
 
     training = config.get("training", {})
     if isinstance(training, dict) and "policy_type" in training and not async_cfg.get("policy_type"):

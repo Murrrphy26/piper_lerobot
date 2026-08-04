@@ -37,5 +37,5 @@ export PYTHONPATH="${PWD}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "[remote] repo: ${PWD}"
 echo "[remote] launching policy server..."
-python -m piper_towel_fold.start_async_policy_server --config "${CONFIG_PATH}" "$@"
+python -m piper_train.start_async_policy_server --config "${CONFIG_PATH}" "$@"
 REMOTE_EOF

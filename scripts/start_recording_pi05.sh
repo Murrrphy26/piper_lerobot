@@ -27,4 +27,4 @@ echo "  Follower joint states are recorded as observation and action."
 echo "  Press Ctrl+C once after each episode to save."
 echo
 
-python -m piper_towel_fold.start_recording --config "${CONFIG_PATH}"
+python -m piper_train.start_recording --config "${CONFIG_PATH}"

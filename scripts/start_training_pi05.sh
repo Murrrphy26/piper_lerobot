@@ -18,4 +18,4 @@ export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-python -m piper_towel_fold.start_training --config "${CONFIG_PATH}" "$@"
+python -m piper_train.start_training --config "${CONFIG_PATH}" "$@"

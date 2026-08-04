@@ -43,4 +43,4 @@ else
   echo "SKIP_MOVE_TO_START=true：跳过归位，直接推理。"
 fi
 
-python -m piper_towel_fold.start_policy_live --config "${CONFIG_PATH}" "$@"
+python -m piper_train.start_policy_live --config "${CONFIG_PATH}" "$@"

@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lerobot_policy_act_piper"
+name = "piper-train"
 version = "0.1.0"
-description = "ACT policy with per-camera feature scaling and camera ID embeddings for Piper cube picking"
+description = "Piper robot data collection, training, inference, and safety utilities"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

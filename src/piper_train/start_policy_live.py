@@ -19,6 +19,40 @@ TOP_LEVEL_KEYS = {
 }
 
 
+SAFETY_KEY_MAP = {
+    "enabled": "safety_enabled",
+    "on_violation": "safety_on_violation",
+    "left_min_z_m": "safety_left_min_z_m",
+    "right_min_z_m": "safety_right_min_z_m",
+    "allowed_below_min_m": "safety_allowed_below_min_m",
+    "finite_check": "safety_finite_check",
+    "fk_provider": "safety_fk_provider",
+    "dh_is_offset": "safety_dh_is_offset",
+}
+
+
+def resolve_safety_block(config: dict[str, Any], section: dict[str, Any]) -> dict[str, Any] | None:
+    safety = section.get("safety")
+    if safety is None:
+        safety = config.get("safety")
+    if safety is None:
+        return None
+    if not isinstance(safety, dict):
+        raise ValueError("'safety' must be an object when present.")
+
+    merged = dict(safety)
+    calibration_path = merged.pop("calibration", None)
+    if calibration_path:
+        with Path(str(calibration_path)).open("r", encoding="utf-8") as calibration_file:
+            calibration = json.load(calibration_file)
+        if not isinstance(calibration, dict) or not isinstance(calibration.get("safety"), dict):
+            raise ValueError(f"Safety calibration file must contain a 'safety' object: {calibration_path}")
+        calibrated_safety = dict(calibration["safety"])
+        calibrated_safety.update(merged)
+        merged = calibrated_safety
+    return merged
+
+
 def load_config(config_path: Path) -> dict[str, Any]:
     with config_path.open("r", encoding="utf-8") as config_file:
         data = json.load(config_file)
@@ -97,11 +131,17 @@ def build_namespace(config: dict[str, Any]) -> argparse.Namespace:
         args.camera_names = camera_names
 
     for key, value in policy_live.items():
-        if key in {"root", "cameras"}:
+        if key in {"root", "cameras", "safety"}:
             continue
         if not hasattr(args, key):
             raise ValueError(f"Unsupported policy_live config key: {key}")
         setattr(args, key, value)
+
+    safety = resolve_safety_block(config, policy_live)
+    if safety is not None:
+        for config_key, attr_name in SAFETY_KEY_MAP.items():
+            if config_key in safety:
+                setattr(args, attr_name, safety[config_key])
 
     if "repo_id" in policy_live and "dataset_root" not in policy_live:
         root = policy_live.get("root", config.get("root", "data/lerobot"))

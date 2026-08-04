@@ -23,4 +23,4 @@ if [[ "${SKIP_RESET}" != "true" ]]; then
 fi
 
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
-python -m piper_towel_fold.start_async_policy_client --config "${CONFIG_PATH}" "$@"
+python -m piper_train.start_async_policy_client --config "${CONFIG_PATH}" "$@"

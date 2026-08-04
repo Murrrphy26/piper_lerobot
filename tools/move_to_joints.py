@@ -30,8 +30,8 @@ import argparse
 import math
 import time
 
-from piper_towel_fold.config import PiperRobotConfig
-from piper_towel_fold.piper import PiperRobot
+from piper_train.config import PiperRobotConfig
+from piper_train.piper import PiperRobot
 
 # 起始 / home 位姿（度 / 米）——--preset home 使用
 HOME_LEFT_DEG = [0.287, 0.000, 0.000, -0.634, 25.124, 3.356]

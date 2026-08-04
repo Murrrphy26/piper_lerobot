@@ -23,4 +23,4 @@ echo "  config: ${CONFIG_PATH}"
 echo "  bind: see policy_server.host / policy_server.port in config"
 echo "  IPC connects via: scripts/ssh_tunnel_policy_server.sh"
 echo
-python -m piper_towel_fold.start_async_policy_server --config "${CONFIG_PATH}" "$@"
+python -m piper_train.start_async_policy_server --config "${CONFIG_PATH}" "$@"

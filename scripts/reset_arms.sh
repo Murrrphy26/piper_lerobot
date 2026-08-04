@@ -15,4 +15,4 @@ echo "  left  -> ${LEFT_CAN}"
 echo "  right -> ${RIGHT_CAN}"
 echo
 
-python -m piper_towel_fold.reset --can "${LEFT_CAN},${RIGHT_CAN}" "$@"
+python -m piper_train.reset --can "${LEFT_CAN},${RIGHT_CAN}" "$@"

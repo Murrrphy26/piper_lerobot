@@ -47,7 +47,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `src/piper_towel_fold/preprocessing.py` | 核心模块：图像增强、EMA/SG 平滑、`FramePreprocessor` |
+| `src/piper_train/preprocessing.py` | 核心模块：图像增强、EMA/SG 平滑、`FramePreprocessor` |
 | `tools/preprocess_dataset.py` | 离线批处理：读取原 LeRobot 数据集，写出新 `repo_id` |
 | `docs/data-preprocessing.md` | 本文档 |
 
@@ -56,10 +56,10 @@
 | 文件 | 改动 |
 |------|------|
 | `configs/record_pick_cube.json` | 新增 `preprocessing` 配置段 |
-| `src/piper_towel_fold/record_episode.py` | 在 `record_frame()` 前调用 `FramePreprocessor` |
-| `src/piper_towel_fold/start_recording.py` | 从 JSON 读取 `preprocessing`，跳过 `training`/`policy_live` 等非录制字段 |
-| `src/piper_towel_fold/run_policy_live.py` | 策略输入前对 observation 应用相同预处理 |
-| `src/piper_towel_fold/start_policy_live.py` | 从顶层或 `policy_live` 读取 `preprocessing` |
+| `src/piper_train/record_episode.py` | 在 `record_frame()` 前调用 `FramePreprocessor` |
+| `src/piper_train/start_recording.py` | 从 JSON 读取 `preprocessing`，跳过 `training`/`policy_live` 等非录制字段 |
+| `src/piper_train/run_policy_live.py` | 策略输入前对 observation 应用相同预处理 |
+| `src/piper_train/start_policy_live.py` | 从顶层或 `policy_live` 读取 `preprocessing` |
 
 ### 3.3 未改动的部分
 
@@ -370,7 +370,7 @@ python tools/preprocess_dataset.py --config configs/record_pick_cube.json \
   --target-repo-id local/cube_v4_3view_side_pp --smoothing-method savgol
 
 # 仅查看训练命令
-python -m piper_towel_fold.start_training --config configs/record_pick_cube.json --dry-run
+python -m piper_train.start_training --config configs/record_pick_cube.json --dry-run
 
 # 训练
 bash scripts/start_training.sh configs/record_pick_cube.json
@@ -379,7 +379,7 @@ bash scripts/start_training.sh configs/record_pick_cube.json
 bash scripts/run_policy_live.sh configs/record_pick_cube.json
 
 # 离线验证 checkpoint
-python -m piper_towel_fold.offline_infer \
+python -m piper_train.offline_infer \
   --policy-path outputs/train/act_cube_v4_3view_side/checkpoints/010000/pretrained_model \
   --dataset-root data/lerobot/local/cube_v4_3view_side_pp
 ```

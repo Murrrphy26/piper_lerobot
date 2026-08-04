@@ -30,9 +30,9 @@ from replay_episode import (  # noqa: E402
     print_pose,
 )
 
-from piper_towel_fold.config import PiperRobotConfig
-from piper_towel_fold.offline_infer import load_dataset
-from piper_towel_fold.piper import PiperRobot
+from piper_train.config import PiperRobotConfig
+from piper_train.offline_infer import load_dataset
+from piper_train.piper import PiperRobot
 
 
 def load_json_config(path: Path) -> dict[str, Any]:

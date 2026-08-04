@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from piper_towel_fold.episode_outcomes import (  # noqa: E402
+from piper_train.episode_outcomes import (  # noqa: E402
     DEFAULT_OUTCOME_FILTER,
     select_episodes_for_training,
     summarize_outcomes,

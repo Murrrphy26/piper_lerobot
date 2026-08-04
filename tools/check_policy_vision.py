@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from piper_towel_fold.offline_infer import (
+from piper_train.offline_infer import (
     action_tensor_to_dict,
     get_episode_bounds,
     load_dataset,

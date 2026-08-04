@@ -102,7 +102,7 @@ import json
 import sys
 from pathlib import Path
 
-from piper_towel_fold.episode_outcomes import resolve_training_episodes
+from piper_train.episode_outcomes import resolve_training_episodes
 
 dataset_root = Path(sys.argv[1])
 training = {

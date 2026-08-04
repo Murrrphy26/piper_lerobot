@@ -39,14 +39,14 @@ from move_to_joints import (  # noqa: E402
     wait_for_valid_state,
 )
 
-from piper_towel_fold.config import PiperRobotConfig
-from piper_towel_fold.offline_infer import (
+from piper_train.config import PiperRobotConfig
+from piper_train.offline_infer import (
     action_tensor_to_dict,
     get_episode_bounds,
     load_dataset,
 )
-from piper_towel_fold.piper import PiperRobot
-from piper_towel_fold.recorder import ARM_STATE_KEYS
+from piper_train.piper import PiperRobot
+from piper_train.recorder import ARM_STATE_KEYS
 
 # 回放轨迹来源
 REPLAY_SOURCE_ACTION = "action"

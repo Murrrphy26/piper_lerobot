@@ -36,13 +36,13 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from piper_towel_fold.offline_infer import (  # noqa: E402
+from piper_train.offline_infer import (  # noqa: E402
     get_column,
     get_episode_bounds,
     import_lerobot_dataset,
     load_dataset,
 )
-from piper_towel_fold.preprocessing import numpy_image_from_sample  # noqa: E402
+from piper_train.preprocessing import numpy_image_from_sample  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # ACT 训练配套（脚本内注释标注；请在训练配置中同步设置）

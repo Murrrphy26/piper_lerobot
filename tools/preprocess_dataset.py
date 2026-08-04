@@ -15,15 +15,15 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from piper_towel_fold.offline_infer import get_column, get_episode_bounds, import_lerobot_dataset, load_dataset
-from piper_towel_fold.preprocessing import (
+from piper_train.offline_infer import get_column, get_episode_bounds, import_lerobot_dataset, load_dataset
+from piper_train.preprocessing import (
     FramePreprocessor,
     load_preprocessing_config,
     numpy_image_from_sample,
     state_dict_to_vector,
     vector_to_state_dict,
 )
-from piper_towel_fold.recorder import ARM_STATE_KEYS
+from piper_train.recorder import ARM_STATE_KEYS
 
 
 def parse_args() -> argparse.Namespace:

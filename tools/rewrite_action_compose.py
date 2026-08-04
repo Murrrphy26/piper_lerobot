@@ -22,7 +22,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from piper_towel_fold.action_compose import (  # noqa: E402
+from piper_train.action_compose import (  # noqa: E402
     ACTION_COMPOSE_MODES,
     build_composed_dataset,
     default_compose_repo_id,
