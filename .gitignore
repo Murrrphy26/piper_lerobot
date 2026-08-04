@@ -22,4 +22,5 @@ env/
 venv/
 backups
 camera_temp
+camera_test
 data

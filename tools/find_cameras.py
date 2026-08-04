@@ -1,250 +1,298 @@
 #!/usr/bin/env python3
-"""Find RGB-like /dev/video devices and save one screenshot per device.
+"""Scan V4L2 nodes, identify RGB camera nodes, and save screenshots.
 
-The robot PC may enumerate cameras differently after reboot. This script scans
-video nodes, attempts to capture a frame from each one, and saves screenshots for
-devices that look like usable RGB/color cameras.
-
-It intentionally does not assume Orbbec node offsets such as "base + 6".
+Why this exists:
+- One physical Orbbec depth camera exposes several /dev/video* nodes.
+- Some depth/IR nodes can be opened by OpenCV, so "cap.read() works" is not
+  enough to say it is RGB.
+- Old test_cameras.py only scanned video0..video14 and missed video16/18/20.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
 import subprocess
 import time
+from multiprocessing import Pipe, Process
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 
-
-def list_video_devices() -> list[Path]:
-    devices: list[Path] = []
-    for path in Path("/dev").glob("video*"):
-        match = re.fullmatch(r"video(\d+)", path.name)
-        if match:
-            devices.append(path)
-    return sorted(devices, key=lambda item: int(item.name.replace("video", "")))
+RGB_STRONG = {"MJPG", "YUYV", "RGB3", "BGR3", "YUY2"}
+DEPTH = {"Z16", "Y16"}
+IR = {"GREY", "Y8", "Y10", "Y12"}
 
 
-def run_text(command: list[str]) -> str:
+@dataclass
+class NodeInfo:
+    device: str
+    index: int
+    kind: str
+    readable: bool
+    formats: list[str]
+    card: str = ""
+    bus: str = ""
+    driver: str = ""
+    vendor: str = ""
+    model: str = ""
+    serial: str = ""
+    width: int | None = None
+    height: int | None = None
+    screenshot: str | None = None
+    error: str | None = None
+    frame_stats: dict[str, Any] | None = None
+
+
+def run_text(cmd: list[str], timeout: float = 3.0) -> str:
     try:
-        return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT, timeout=3)
-    except Exception:
-        return ""
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False)
+        return p.stdout or ""
+    except Exception as exc:  # diagnostic script
+        return f"{type(exc).__name__}: {exc}"
 
 
-def device_metadata(device: Path) -> dict[str, Any]:
-    udev = run_text(["udevadm", "info", "-q", "property", "-n", str(device)])
-    v4l2_all = run_text(["v4l2-ctl", "-d", str(device), "--all"])
-    formats = run_text(["v4l2-ctl", "-d", str(device), "--list-formats-ext"])
+def list_video_nodes() -> list[Path]:
+    nodes = []
+    for p in Path('/dev').glob('video*'):
+        if re.fullmatch(r'video\d+', p.name):
+            nodes.append(p)
+    return sorted(nodes, key=lambda p: int(p.name.replace('video', '')))
 
-    props: dict[str, str] = {}
-    for line in udev.splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            props[key] = value
 
-    card = ""
-    bus = ""
-    for line in v4l2_all.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("Card type"):
-            card = stripped.split(":", 1)[-1].strip()
-        elif stripped.startswith("Bus info"):
-            bus = stripped.split(":", 1)[-1].strip()
+def parse_key(text: str, pattern: str) -> str:
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else ""
 
-    format_hits = []
-    for token in ("MJPG", "YUYV", "RGB", "BGR", "NV12", "YUY2"):
-        if token.lower() in formats.lower():
-            format_hits.append(token)
 
-    return {
-        "udev": props,
-        "card": card,
-        "bus": bus,
-        "format_hits": format_hits,
-        "formats_raw": formats,
+def v4l2_meta(dev: str) -> tuple[dict[str, str], list[str]]:
+    all_text = run_text(['v4l2-ctl', '-d', dev, '--all'])
+    fmt_text = run_text(['v4l2-ctl', '-d', dev, '--list-formats-ext'])
+    meta = {
+        'driver': parse_key(all_text, r'Driver name\s*:\s*(.+)'),
+        'card': parse_key(all_text, r'Card type\s*:\s*(.+)'),
+        'bus': parse_key(all_text, r'Bus info\s*:\s*(.+)'),
     }
+    formats: list[str] = []
+    for m in re.finditer(r"\[\d+\]:\s*'([^']+)'", fmt_text):
+        fmt = m.group(1).strip().upper()
+        if fmt and fmt not in formats:
+            formats.append(fmt)
+    return meta, formats
 
 
-def capture_frame(
-    device: Path,
-    *,
+def udev_meta(dev: str) -> dict[str, str]:
+    text = run_text(['udevadm', 'info', '-q', 'property', '-n', dev])
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        if '=' not in line:
+            continue
+        k, v = line.split('=', 1)
+        if k in {'ID_VENDOR', 'ID_MODEL', 'ID_SERIAL', 'ID_PATH'}:
+            out[k] = v
+    return out
+
+
+def classify(formats: list[str], card: str) -> str:
+    fmts = set(f.upper().strip() for f in formats)
+    if not fmts:
+        return 'unknown'
+    if fmts & RGB_STRONG:
+        return 'rgb'
+    if fmts & DEPTH:
+        return 'depth'
+    if fmts & IR or 'NV12' in fmts:
+        # On these Orbbec devices, GREY/NV12 nodes are not normal RGB nodes.
+        return 'ir_or_aux'
+    return 'unknown'
+
+
+def capture(dev: str, width: int, height: int, warmup: int) -> tuple[bool, np.ndarray | None, str | None]:
+    cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
+        cap = cv2.VideoCapture(dev)
+    if not cap.isOpened():
+        return False, None, 'open_failed'
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    frame = None
+    ok = False
+    for _ in range(max(1, warmup)):
+        ok, frame = cap.read()
+        time.sleep(0.03)
+    cap.release()
+    if not ok or frame is None:
+        return False, None, 'read_failed'
+    return True, frame, None
+
+
+def _capture_worker(conn: Any, dev: str, width: int, height: int, warmup: int) -> None:
+    try:
+        conn.send(capture(dev, width, height, warmup))
+    except Exception as exc:  # diagnostic script
+        conn.send((False, None, f'{type(exc).__name__}: {exc}'))
+    finally:
+        conn.close()
+
+
+def capture_with_timeout(
+    dev: str,
     width: int,
     height: int,
-    warmup_frames: int,
-) -> tuple[bool, np.ndarray | None, dict[str, Any]]:
-    cap = cv2.VideoCapture(str(device))
-    if not cap.isOpened():
-        return False, None, {"reason": "open_failed"}
-
+    warmup: int,
+    timeout_s: float,
+) -> tuple[bool, np.ndarray | None, str | None]:
+    parent, child = Pipe(duplex=False)
+    proc = Process(target=_capture_worker, args=(child, dev, width, height, warmup))
+    proc.start()
+    child.close()
     try:
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        frame = None
-        for _ in range(max(1, warmup_frames)):
-            ok, candidate = cap.read()
-            if ok and candidate is not None:
-                frame = candidate
-            else:
-                time.sleep(0.03)
-
-        if frame is None:
-            return False, None, {
-                "reason": "read_failed",
-                "actual_width": actual_width,
-                "actual_height": actual_height,
-            }
-
-        return True, frame, {
-            "actual_width": actual_width,
-            "actual_height": actual_height,
-            "shape": list(frame.shape),
-        }
+        if parent.poll(timeout_s):
+            return parent.recv()
+        proc.terminate()
+        proc.join(timeout=1.0)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=1.0)
+        return False, None, f'capture_timeout_{timeout_s:g}s'
     finally:
-        cap.release()
+        parent.close()
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=1.0)
 
 
-def color_score(frame: np.ndarray) -> dict[str, Any]:
-    """Return simple heuristics for whether a frame looks RGB/color-like."""
-    if frame.ndim == 2:
-        return {"rgb_like": False, "reason": "single_channel", "channel_std_mean": 0.0}
-    if frame.ndim != 3 or frame.shape[2] < 3:
-        return {"rgb_like": False, "reason": f"bad_shape_{frame.shape}", "channel_std_mean": 0.0}
-
-    sample = frame[:, :, :3].astype(np.float32)
-    channel_means = sample.reshape(-1, 3).mean(axis=0)
-    channel_stds = sample.reshape(-1, 3).std(axis=0)
-    spatial_std = float(sample.mean(axis=2).std())
-    channel_std_mean = float(channel_stds.mean())
-    channel_mean_spread = float(channel_means.max() - channel_means.min())
-
-    # Depth/metadata streams often read as nearly black, nearly flat, or weird
-    # single-channel-like images. This heuristic is deliberately permissive:
-    # save anything that looks like a real color image, let the user inspect.
-    rgb_like = bool(spatial_std > 5.0 and channel_std_mean > 3.0)
-    return {
-        "rgb_like": rgb_like,
-        "spatial_std": spatial_std,
-        "channel_std_mean": channel_std_mean,
-        "channel_mean_spread": channel_mean_spread,
-        "channel_means_bgr": [float(x) for x in channel_means.tolist()],
-    }
+def stats(frame: np.ndarray) -> dict[str, Any]:
+    arr = np.asarray(frame)
+    out: dict[str, Any] = {'shape': list(arr.shape), 'mean': float(arr.mean()), 'std': float(arr.std())}
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        chans = arr[:, :, :3].astype(np.float32).reshape(-1, 3)
+        out['channel_means_bgr'] = [float(x) for x in chans.mean(axis=0)]
+        out['channel_stds_bgr'] = [float(x) for x in chans.std(axis=0)]
+    return out
 
 
-def make_contact_sheet(images: list[tuple[str, np.ndarray]], output: Path, thumb_width: int = 320) -> None:
-    if not images:
+def put_label(img: np.ndarray, label: str) -> np.ndarray:
+    out = img.copy()
+    if out.ndim == 2:
+        out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
+    cv2.rectangle(out, (0, 0), (out.shape[1], 32), (0, 0, 0), -1)
+    cv2.putText(out, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+    return out
+
+
+def contact_sheet(items: list[NodeInfo], out: Path, thumb_w: int = 320) -> None:
+    imgs = []
+    for item in items:
+        if not item.screenshot:
+            continue
+        img = cv2.imread(item.screenshot)
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (thumb_w, max(1, int(h * thumb_w / max(1, w)))))
+        imgs.append(put_label(img, f"{Path(item.device).name} {item.kind}"))
+    if not imgs:
         return
-    thumbs: list[np.ndarray] = []
-    for label, image in images:
-        h, w = image.shape[:2]
-        scale = thumb_width / max(1, w)
-        thumb = cv2.resize(image, (thumb_width, max(1, int(h * scale))))
-        cv2.putText(thumb, label, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        thumbs.append(thumb)
-
-    max_h = max(item.shape[0] for item in thumbs)
-    padded = []
-    for thumb in thumbs:
-        if thumb.shape[0] < max_h:
-            pad = np.zeros((max_h - thumb.shape[0], thumb.shape[1], 3), dtype=np.uint8)
-            thumb = np.vstack([thumb, pad])
-        padded.append(thumb)
-
-    sheet = np.hstack(padded)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(output), sheet)
+    cols = min(3, len(imgs))
+    rows = (len(imgs) + cols - 1) // cols
+    cell_h = max(i.shape[0] for i in imgs)
+    pad = 8
+    sheet = np.full((rows * cell_h + (rows + 1) * pad, cols * thumb_w + (cols + 1) * pad, 3), 245, np.uint8)
+    for n, img in enumerate(imgs):
+        r, c = divmod(n, cols)
+        y = pad + r * (cell_h + pad)
+        x = pad + c * (thumb_w + pad)
+        sheet[y:y + img.shape[0], x:x + img.shape[1]] = img
+    cv2.imwrite(str(out), sheet)
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Find RGB-like video devices and save screenshots.")
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/camera_scan"))
-    parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--warmup-frames", type=int, default=5)
-    parser.add_argument(
-        "--save-all-readable",
-        action="store_true",
-        help="Save frames from every readable node, not only RGB-like nodes.",
-    )
-    parser.add_argument(
-        "--device",
-        action="append",
-        default=None,
-        help="Only scan this device/index. Can be repeated, e.g. --device 16 --device /dev/video18.",
-    )
-    return parser
+def main() -> int:
+    ap = argparse.ArgumentParser(description='Find RGB camera nodes and save screenshots.')
+    ap.add_argument('--output', default='camera_test/rgb_scan')
+    ap.add_argument('--width', type=int, default=640)
+    ap.add_argument('--height', type=int, default=480)
+    ap.add_argument('--warmup', type=int, default=2)
+    ap.add_argument('--capture-timeout', type=float, default=6.0, help='seconds allowed for one device screenshot before marking timeout')
+    ap.add_argument('--save-non-rgb', action='store_true', help='save screenshots from non-RGB nodes when --probe-non-rgb is enabled')
+    ap.add_argument('--probe-non-rgb', action='store_true', help='also try to read depth/IR/aux nodes; default only captures RGB candidates')
+    ap.add_argument('--device', action='append', help='scan only N or /dev/videoN; can repeat')
+    args = ap.parse_args()
 
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.device:
+        nodes = [Path(f'/dev/video{x}') if str(x).isdigit() else Path(str(x)) for x in args.device]
+    else:
+        nodes = list_video_nodes()
 
-def normalize_device(value: str) -> Path:
-    value = str(value).strip()
-    if value.isdigit():
-        return Path(f"/dev/video{value}")
-    return Path(value)
-
-
-def main() -> None:
-    args = build_arg_parser().parse_args()
-    devices = [normalize_device(item) for item in args.device] if args.device else list_video_devices()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    manifest: list[dict[str, Any]] = []
-    contact_images: list[tuple[str, np.ndarray]] = []
-
-    for device in devices:
-        record: dict[str, Any] = {"device": str(device)}
-        record.update(device_metadata(device))
-
-        ok, frame, capture_info = capture_frame(
-            device,
-            width=args.width,
-            height=args.height,
-            warmup_frames=args.warmup_frames,
+    results: list[NodeInfo] = []
+    for node in nodes:
+        idx_m = re.search(r'video(\d+)$', node.name)
+        idx = int(idx_m.group(1)) if idx_m else -1
+        dev = str(node)
+        meta, formats = v4l2_meta(dev)
+        udev = udev_meta(dev)
+        kind = classify(formats, meta.get('card', ''))
+        info = NodeInfo(
+            device=dev,
+            index=idx,
+            kind=kind,
+            readable=False,
+            formats=formats,
+            card=meta.get('card', ''),
+            bus=meta.get('bus', ''),
+            driver=meta.get('driver', ''),
+            vendor=udev.get('ID_VENDOR', ''),
+            model=udev.get('ID_MODEL', ''),
+            serial=udev.get('ID_SERIAL', ''),
         )
-        record["capture"] = capture_info
-        record["readable"] = bool(ok)
+        should_try = kind == 'rgb' or args.probe_non_rgb
+        if should_try:
+            ok, frame, err = capture_with_timeout(dev, args.width, args.height, args.warmup, args.capture_timeout)
+            info.readable = ok
+            info.error = err
+            if ok and frame is not None:
+                h, w = frame.shape[:2]
+                info.width = int(w)
+                info.height = int(h)
+                info.frame_stats = stats(frame)
+                if kind == 'rgb' or args.save_non_rgb:
+                    shot = out_dir / f'video{idx:02d}_{kind}_{w}x{h}.jpg'
+                    cv2.imwrite(str(shot), put_label(frame, f'{node.name} {kind}'))
+                    info.screenshot = str(shot)
+        results.append(info)
 
-        if ok and frame is not None:
-            score = color_score(frame)
-            record["color_score"] = score
-            should_save = bool(score["rgb_like"] or args.save_all_readable)
-            record["rgb_like"] = bool(score["rgb_like"])
-            if should_save:
-                stem = device.name
-                image_path = args.output_dir / f"{stem}.jpg"
-                cv2.imwrite(str(image_path), frame)
-                record["image_path"] = str(image_path)
-                contact_images.append((stem, frame))
-        else:
-            record["rgb_like"] = False
+    rgb_candidates = [x for x in results if x.kind == 'rgb']
+    rgb = [x for x in rgb_candidates if x.readable]
+    unreadable_rgb = [x for x in rgb_candidates if not x.readable]
+    readable_non_rgb = [x for x in results if x.kind != 'rgb' and x.readable]
+    (out_dir / 'manifest.json').write_text(json.dumps([asdict(x) for x in results], ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    contact_sheet(rgb, out_dir / 'contact_sheet_rgb.jpg')
+    contact_sheet([x for x in results if x.screenshot], out_dir / 'contact_sheet_all_saved.jpg')
 
-        manifest.append(record)
-        print(
-            f"{device}: readable={record['readable']} rgb_like={record['rgb_like']} "
-            f"card={record.get('card') or record.get('udev', {}).get('ID_MODEL', '')}"
-        )
-
-    manifest_path = args.output_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    make_contact_sheet(contact_images, args.output_dir / "contact_sheet.jpg")
-
-    print()
-    print(f"manifest:      {manifest_path}")
-    if contact_images:
-        print(f"contact sheet: {args.output_dir / 'contact_sheet.jpg'}")
-    print("RGB-like devices:")
-    for item in manifest:
-        if item.get("rgb_like"):
-            print(f"  {item['device']} -> {item.get('image_path')}")
+    print('\nRGB camera nodes:')
+    if not rgb_candidates:
+        print('  (none)')
+    for x in rgb:
+        print(f'  ✅ {x.device:<12} {x.width}x{x.height} formats={",".join(x.formats)} bus={x.bus} shot={x.screenshot}')
+    for x in unreadable_rgb:
+        print(f'  ⚠️ {x.device:<12} unreadable error={x.error} formats={",".join(x.formats)} bus={x.bus}')
+    if readable_non_rgb:
+        print('\nReadable but NOT RGB:')
+        for x in readable_non_rgb:
+            print(f'  {x.kind:<9} {x.device:<12} {x.width}x{x.height} formats={",".join(x.formats)}')
+    print(f'\nRGB metadata candidates: {len(rgb_candidates)}')
+    print(f'RGB readable screenshots: {len(rgb)}')
+    print(f'Output dir: {out_dir}')
+    print(f'Manifest: {out_dir / "manifest.json"}')
+    return 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())
