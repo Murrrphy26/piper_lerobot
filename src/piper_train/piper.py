@@ -1,5 +1,6 @@
 from functools import cached_property
 import math
+import time
 
 import numpy as np
 from lerobot.cameras import make_cameras_from_configs
@@ -116,12 +117,19 @@ class PiperRobot(Robot):
         return arm
 
     def _enable_arm_control(self, arm: object) -> None:
-        enable_arm = getattr(arm, "EnableArm", None)
-        if callable(enable_arm):
-            try:
-                enable_arm(7)
-            except TypeError:
-                enable_arm()
+        # V2 SDK 的官方控制示例会反复调用 EnablePiper，直到六个关节均已
+        # 使能。只发一次 EnableArm(7) 时，双臂上电/初始化速度稍有差异就会
+        # 出现本次仅左臂、下次仅右臂接受控制的现象。
+        enable_piper = getattr(arm, "EnablePiper", None)
+        if callable(enable_piper):
+            deadline = time.monotonic() + 5.0
+            while not bool(enable_piper()):
+                if time.monotonic() >= deadline:
+                    can_name = self._arm_can_name(arm)
+                    raise RuntimeError(f"[{can_name}] 机械臂未能在 5 秒内完成使能")
+                time.sleep(0.01)
+        else:
+            self._enable_arm_legacy(arm)
 
         mode_ctrl = getattr(arm, "MotionCtrl_2", None)
         if callable(mode_ctrl):
@@ -129,6 +137,40 @@ class PiperRobot(Robot):
                 mode_ctrl(0x01, 0x01, int(self.config.control_speed), 0x00)
             except TypeError:
                 mode_ctrl(0x01, 0x01, int(self.config.control_speed))
+
+    @staticmethod
+    def _arm_can_name(arm: object) -> str:
+        get_can_name = getattr(arm, "GetCanName", None)
+        if callable(get_can_name):
+            try:
+                return str(get_can_name())
+            except Exception:
+                pass
+        return "unknown CAN"
+
+    def _enable_arm_legacy(self, arm: object) -> None:
+        """兼容没有 EnablePiper 的旧 SDK，并尽可能核验六轴使能状态。"""
+        enable_arm = getattr(arm, "EnableArm", None)
+        if not callable(enable_arm):
+            raise RuntimeError("当前 piper_sdk 同时缺少 EnablePiper 和 EnableArm")
+
+        get_enable_status = getattr(arm, "GetArmEnableStatus", None)
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                enable_arm(7)
+            except TypeError:
+                enable_arm()
+
+            # 很旧的 SDK 没有状态接口，只能维持原先的一次发送行为。
+            if not callable(get_enable_status):
+                return
+            if all(bool(value) for value in get_enable_status()):
+                return
+            if time.monotonic() >= deadline:
+                can_name = self._arm_can_name(arm)
+                raise RuntimeError(f"[{can_name}] 六个关节未能在 5 秒内全部使能")
+            time.sleep(0.01)
 
     def _sdk_arm_is_connected(self, arm: object) -> bool:
         get_status = getattr(arm, "get_connect_status", None)

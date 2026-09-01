@@ -22,7 +22,13 @@ _TOOLS_DIR = Path(__file__).resolve().parent
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
-from move_to_joints import format_arm, move_to, wait_for_valid_state  # noqa: E402
+from move_to_joints import (  # noqa: E402
+    arm_joints_deg,
+    format_arm,
+    joints_to_action,
+    move_to,
+    wait_for_valid_state,
+)
 from replay_episode import (  # noqa: E402
     action_to_deg_targets,
     infer_repo_id,
@@ -133,6 +139,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-wait", type=float, default=5.0)
     parser.add_argument("--settle", type=float, default=0.0)
     parser.add_argument(
+        "--open-grippers-first",
+        action="store_true",
+        help="移动关节前先保持当前位姿并松开双夹爪。",
+    )
+    parser.add_argument(
+        "--open-gripper-m",
+        type=float,
+        default=0.07,
+        help="松开夹爪的目标开度（米），Piper 默认全开约 0.07。",
+    )
+    parser.add_argument(
+        "--open-timeout",
+        type=float,
+        default=5.0,
+        help="等待夹爪松开的最长时间（秒）。",
+    )
+    parser.add_argument(
+        "--keep-grippers-open",
+        action="store_true",
+        help="移动到 episode 初始关节位姿时继续保持双夹爪松开。",
+    )
+    parser.add_argument(
         "--strict-move-to",
         action="store_true",
         help="到位超时则失败退出；默认只告警",
@@ -140,6 +168,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video-backend", default="pyav", choices=("pyav", "torchcodec"))
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
+
+
+def open_grippers(
+    robot: PiperRobot,
+    observation: dict[str, Any],
+    *,
+    target_m: float,
+    timeout_s: float,
+    period_s: float,
+    tolerance_m: float = 0.003,
+) -> dict[str, Any]:
+    """Open both grippers while holding the current joint pose."""
+    if not 0.0 <= target_m <= 0.1:
+        raise ValueError(f"--open-gripper-m 应在 [0, 0.1] 米内，收到 {target_m}")
+
+    left_deg = arm_joints_deg(observation, "left")
+    right_deg = arm_joints_deg(observation, "right")
+    action: dict[str, float] = {}
+    action.update(joints_to_action("left", left_deg, target_m))
+    action.update(joints_to_action("right", right_deg, target_m))
+
+    deadline = time.monotonic() + timeout_s
+    latest = observation
+    while True:
+        robot.send_action(action)
+        latest = robot.get_observation()
+        left_gripper = float(latest["left_gripper.pos"])
+        right_gripper = float(latest["right_gripper.pos"])
+        if min(left_gripper, right_gripper) >= target_m - tolerance_m:
+            print(
+                f"夹爪已松开：left={left_gripper:.4f} m, "
+                f"right={right_gripper:.4f} m"
+            )
+            return latest
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                "等待夹爪松开超时，取消后续移动；"
+                f"left={left_gripper:.4f} m, right={right_gripper:.4f} m, "
+                f"target={target_m:.4f} m"
+            )
+            return latest
+        time.sleep(period_s)
 
 
 def main() -> None:
@@ -200,7 +270,20 @@ def main() -> None:
         print(format_arm(obs, "left"))
         print(format_arm(obs, "right"))
 
+        if args.open_grippers_first:
+            print(f"先松开双夹爪至 {args.open_gripper_m:.4f} m，并保持当前关节位姿…")
+            obs = open_grippers(
+                robot,
+                obs,
+                target_m=args.open_gripper_m,
+                timeout_s=args.open_timeout,
+                period_s=args.period,
+            )
+
         left_deg, right_deg, left_g, right_g = action_to_deg_targets(move_to_pose)
+        if args.keep_grippers_open:
+            left_g = args.open_gripper_m
+            right_g = args.open_gripper_m
         print(f"移动到 episode 初始位姿（{move_to_label}，tol={args.tol_deg}°）…")
         try:
             move_to(
