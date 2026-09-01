@@ -14,6 +14,7 @@ __pycache__/
 *.pth
 dataset/
 outputs/
+logs/http_server/
 # 编辑器配置
 .vscode/
 .idea/

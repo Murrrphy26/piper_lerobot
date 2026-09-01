@@ -8,10 +8,20 @@ version = "0.1.0"
 description = "Piper robot data collection, training, inference, and safety utilities"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+]
 
 [project.optional-dependencies]
-dev = ["lerobot", "torch", "torchvision", "einops"]
+dev = [
+    "lerobot",
+    "torch",
+    "torchvision",
+    "einops",
+    "httpx>=0.27,<1",
+    "pytest>=8,<9",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
