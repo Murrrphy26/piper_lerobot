@@ -11,11 +11,6 @@ HTTP_SERVER_HOST="${HTTP_SERVER_HOST:-0.0.0.0}"
 HTTP_SERVER_PORT="${HTTP_SERVER_PORT:-12123}"
 
 mkdir -p "${HTTP_SERVER_LOG_DIR}"
-touch \
-  "${HTTP_SERVER_LOG_DIR}/http.log" \
-  "${HTTP_SERVER_LOG_DIR}/remote_policy_server.log" \
-  "${HTTP_SERVER_LOG_DIR}/ssh_tunnel.log" \
-  "${HTTP_SERVER_LOG_DIR}/async_policy_client.log"
 
 cd "${REPO_ROOT}"
 echo "Starting Piper HTTP Control Server."
