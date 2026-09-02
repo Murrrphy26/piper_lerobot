@@ -19,15 +19,43 @@ echo "Starting remote policy server via SSH (optional convenience script)."
 echo "  run from: robot IPC"
 echo "  target: ${REMOTE_SSH_HOST}"
 echo "  gpu repo: ${REMOTE_REPO_ROOT}"
+echo "  conda env: ${REMOTE_CONDA_ENV}"
 echo
 echo "Preferred: log into allinai2 and run scripts/start_policy_server_pi05.sh directly."
 echo
-ssh -t "${REMOTE_SSH_HOST}" bash -s -- "${REMOTE_REPO_ROOT}" "${CONFIG_PATH}" "$@" <<'REMOTE_EOF'
+ssh "${REMOTE_SSH_HOST}" bash -s -- \
+  "${REMOTE_REPO_ROOT}" "${CONFIG_PATH}" "${REMOTE_CONDA_ENV}" "$@" <<'REMOTE_EOF'
 set -euo pipefail
 
 REMOTE_REPO_ROOT="$1"
 CONFIG_PATH="$2"
-shift 2
+REMOTE_CONDA_ENV="$3"
+shift 3
+
+CONDA_BASE=""
+if command -v conda >/dev/null 2>&1; then
+  CONDA_BASE="$(conda info --base)"
+else
+  CONDA_BASE="$(bash -lc 'conda info --base' 2>/dev/null || true)"
+fi
+
+if [[ -z "${CONDA_BASE}" ]]; then
+  for candidate in "${HOME}/miniconda3" "${HOME}/anaconda3" "/opt/conda"; do
+    if [[ -f "${candidate}/etc/profile.d/conda.sh" ]]; then
+      CONDA_BASE="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${CONDA_BASE}" || ! -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]]; then
+  echo "[remote] conda installation not found." >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1091
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
+conda activate "${REMOTE_CONDA_ENV}"
 
 cd "${REMOTE_REPO_ROOT}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
@@ -36,6 +64,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 export PYTHONPATH="${PWD}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "[remote] repo: ${PWD}"
+echo "[remote] conda env: ${CONDA_DEFAULT_ENV}"
 echo "[remote] launching policy server..."
 python -m piper_train.start_async_policy_server --config "${CONFIG_PATH}" "$@"
 REMOTE_EOF

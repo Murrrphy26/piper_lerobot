@@ -45,6 +45,7 @@ def emit(name, value):
 emit("REMOTE_CONFIG_PATH", path)
 emit("REMOTE_SSH_HOST", remote.get("ssh_host", gpu_server.get("ssh_host", "allinai2")))
 emit("REMOTE_REPO_ROOT", remote.get("gpu_repo_root", remote.get("remote_repo_root", gpu_server.get("repo_root", "~/piper"))))
+emit("REMOTE_CONDA_ENV", remote.get("conda_env", "piper"))
 emit("REMOTE_USE_SSH_TUNNEL", str(remote.get("use_ssh_tunnel", True)).lower())
 emit("REMOTE_TUNNEL_LOCAL_PORT", remote.get("tunnel_local_port", 8080))
 emit("REMOTE_TUNNEL_REMOTE_HOST", remote.get("tunnel_remote_host", "127.0.0.1"))
