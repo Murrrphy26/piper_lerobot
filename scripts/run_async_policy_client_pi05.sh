@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 运行在：工控机
-# 作用：先松开夹爪并回到 config 数据集 episode 0 初始位姿，等待人工确认后，
+# 作用：先松开夹爪并回到固定 home 位姿，等待人工确认后，
 #      再启动远程 pi05 异步推理客户端。
 #
 # 用法：
@@ -9,8 +9,9 @@
 # 环境变量：
 #   SKIP_BRINGUP     默认 true；false 时先初始化 CAN
 #   SKIP_RESET       默认 true；false 时先退出 teach/drag 模式
-#   SKIP_RESET_POSE  默认 false；true 时跳过“松夹爪 + episode 0 归位”
+#   SKIP_RESET_POSE  默认 false；true 时跳过“松夹爪 + 固定 home 归位”
 #   SKIP_CONFIRM     默认 false；true 时归位后不等待回车（不建议真机使用）
+#   OPEN_GRIPPER_M   默认 0.07；归位过程中左右夹爪保持该开度（米）
 set -euo pipefail
 
 CONFIG_PATH="${1:-configs/record_towel_fold_pi05.json}"
@@ -22,6 +23,7 @@ SKIP_BRINGUP="${SKIP_BRINGUP:-true}"
 SKIP_RESET="${SKIP_RESET:-true}"
 SKIP_RESET_POSE="${SKIP_RESET_POSE:-false}"
 SKIP_CONFIRM="${SKIP_CONFIRM:-false}"
+OPEN_GRIPPER_M="${OPEN_GRIPPER_M:-0.07}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -48,10 +50,13 @@ if [[ "${SKIP_RESET}" != "true" ]]; then
 fi
 
 if [[ "${SKIP_RESET_POSE}" != "true" ]]; then
-  echo "=== [1/2] 松开夹爪并移动到 episode 0 初始位姿 ==="
-  bash "${SCRIPT_DIR}/reset_pose.sh" "${CONFIG_PATH}"
+  echo "=== [1/2] 松开夹爪并移动到固定 home 位姿 ==="
+  "${SCRIPT_DIR}/run_move_to_joints.sh" \
+    --preset home \
+    --left-gripper "${OPEN_GRIPPER_M}" \
+    --right-gripper "${OPEN_GRIPPER_M}"
 else
-  echo "SKIP_RESET_POSE=true：跳过松夹爪和归位。"
+  echo "SKIP_RESET_POSE=true：跳过松夹爪和固定 home 归位。"
 fi
 
 echo
