@@ -11,6 +11,7 @@ class FakeManager:
     def __init__(self):
         self.calls = []
         self.failure = None
+        self.log_dir = Path("/tmp")
 
     def _call(self, name, result):
         self.calls.append(name)
