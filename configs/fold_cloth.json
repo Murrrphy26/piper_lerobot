@@ -108,7 +108,7 @@
       "notes": "GPU 服务器(A600)跑 Policy Server；工控机跑 SSH 隧道 + Robot Client。仓库在 /data/yangjingwen/code/SoftFold。",
       "gpu_server": {
         "ssh_host": "allinai2",
-        "repo_root": "/mnt/disk/fyx/Piper_SoftFold_Pi05",
+        "repo_root": "/mnt/disk/fyx/piper_lerobot",
         "run_script": "scripts/start_policy_server_pi05.sh"
       },
       "robot_ipc": {
@@ -130,7 +130,7 @@
     },
     "remote_gpu": {
       "ssh_host": "allinai2",
-      "gpu_repo_root": "/mnt/disk/fyx/Piper_SoftFold_Pi05",
+      "gpu_repo_root": "/mnt/disk/fyx/piper_lerobot",
       "conda_env": "piper",
       "use_ssh_tunnel": true,
       "tunnel_local_port": 8081,

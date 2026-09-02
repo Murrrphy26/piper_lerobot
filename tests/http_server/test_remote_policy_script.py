@@ -10,6 +10,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class RemotePolicyScriptTest(unittest.TestCase):
+    def test_fold_cloth_uses_actual_remote_repository(self):
+        config = json.loads(
+            (REPO_ROOT / "configs/fold_cloth.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            config["remote_gpu"]["gpu_repo_root"],
+            "/mnt/disk/fyx/piper_lerobot",
+        )
+        self.assertEqual(
+            config["deployment"]["gpu_server"]["repo_root"],
+            "/mnt/disk/fyx/piper_lerobot",
+        )
+
     def test_remote_config_exports_conda_environment(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -52,6 +66,7 @@ class RemotePolicyScriptTest(unittest.TestCase):
         self.assertNotIn('ssh -t "${REMOTE_SSH_HOST}"', script)
         self.assertIn('REMOTE_CONDA_ENV="$3"', script)
         self.assertIn('conda activate "${REMOTE_CONDA_ENV}"', script)
+        self.assertIn('[[ ! -d "src/piper_train" ]]', script)
         self.assertLess(
             script.index('conda activate "${REMOTE_CONDA_ENV}"'),
             script.index("python -m piper_train.start_async_policy_server"),

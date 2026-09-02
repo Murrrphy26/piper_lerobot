@@ -32,6 +32,19 @@ CONFIG_PATH="$2"
 REMOTE_CONDA_ENV="$3"
 shift 3
 
+if ! cd "${REMOTE_REPO_ROOT}"; then
+  echo "[remote] repository not found: ${REMOTE_REPO_ROOT}" >&2
+  exit 1
+fi
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  echo "[remote] config not found: ${REMOTE_REPO_ROOT}/${CONFIG_PATH}" >&2
+  exit 1
+fi
+if [[ ! -d "src/piper_train" ]]; then
+  echo "[remote] Python package not found: ${REMOTE_REPO_ROOT}/src/piper_train" >&2
+  exit 1
+fi
+
 CONDA_BASE=""
 if command -v conda >/dev/null 2>&1; then
   CONDA_BASE="$(conda info --base)"
@@ -57,7 +70,6 @@ fi
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate "${REMOTE_CONDA_ENV}"
 
-cd "${REMOTE_REPO_ROOT}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:128}"
