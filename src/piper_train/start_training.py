@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .train_loss import report_from_log
+from .training_image_transforms import append_image_transform_options
 from .action_compose import (
     ACTION_COMPOSE_MODES,
     build_composed_dataset,
@@ -314,6 +315,7 @@ def command_from_config(
     if rename_map:
         cmd.append(f"--rename_map={json.dumps(rename_map)}")
 
+    append_image_transform_options(cmd, training)
     append_act_piper_policy_options(cmd, training)
     append_pi05_policy_options(cmd, training)
     append_xvla_policy_options(cmd, training)
