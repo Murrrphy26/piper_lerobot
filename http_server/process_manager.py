@@ -61,6 +61,23 @@ class ProcessManager:
     def _alive(process) -> bool:
         return process is not None and process.poll() is None
 
+    def status(self) -> dict[str, bool]:
+        """Return live child state and discard handles for exited children."""
+        with self._lock:
+            if not self._alive(self._policy_server):
+                self._policy_server = None
+            if not self._alive(self._ssh_tunnel):
+                self._ssh_tunnel = None
+                if self._client_pending:
+                    self._client_cancel.set()
+                    self._client_pending = False
+            if not self._alive(self._async_client):
+                self._async_client = None
+            return {
+                "policy_server_running": self._policy_server is not None,
+                "policy_client_running": self._async_client is not None,
+            }
+
     def _spawn(self, script: str, log_name: str, *, env=None):
         command = [str(self.repo_root / "scripts" / script), self.CONFIG_PATH]
         log_path = self.log_dir / log_name

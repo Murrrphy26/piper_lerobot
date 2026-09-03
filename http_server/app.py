@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .log_reader import LogNotFoundError, LogReader
 from .process_manager import AlreadyRunningError, ProcessManager, ProcessStopError
+from .watchdog import HeartbeatWatchdog
 
 LOGGER = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -27,17 +28,26 @@ def _default_manager() -> ProcessManager:
     return ProcessManager(repo_root=REPO_ROOT, log_dir=log_dir)
 
 
-def create_app(manager: ProcessManager | None = None) -> FastAPI:
+def create_app(
+    manager: ProcessManager | None = None,
+    watchdog: HeartbeatWatchdog | None = None,
+) -> FastAPI:
     process_manager = manager or _default_manager()
+    heartbeat_watchdog = watchdog or HeartbeatWatchdog(process_manager)
     log_reader = LogReader(process_manager.log_dir)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        process_manager.stop_all()
+        heartbeat_watchdog.start()
+        try:
+            yield
+        finally:
+            heartbeat_watchdog.stop()
+            process_manager.stop_all()
 
     app = FastAPI(title="Piper HTTP Control Server", lifespan=lifespan)
     app.state.manager = process_manager
+    app.state.watchdog = heartbeat_watchdog
 
     @app.exception_handler(AlreadyRunningError)
     async def already_running_handler(_: Request, error: AlreadyRunningError):
@@ -51,6 +61,12 @@ def create_app(manager: ProcessManager | None = None) -> FastAPI:
     @app.exception_handler(LogNotFoundError)
     async def log_not_found_handler(_: Request, error: LogNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(_: Request, error: Exception):
+        LOGGER.exception("HTTP control request failed", exc_info=error)
+        detail = str(error) or "HTTP 控制请求执行失败"
+        return JSONResponse(status_code=500, content={"detail": detail})
 
     @app.post("/policy-server/start")
     def start_policy_server():
@@ -67,6 +83,10 @@ def create_app(manager: ProcessManager | None = None) -> FastAPI:
     @app.post("/policy-client/stop")
     def stop_policy_client():
         return process_manager.stop_policy_client()
+
+    @app.post("/heartbeat")
+    def heartbeat():
+        return heartbeat_watchdog.heartbeat()
 
     @app.get("/logs")
     def list_logs():
